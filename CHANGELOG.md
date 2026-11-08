@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Live progress with numbers: the status line now shows streamed output as it arrives (~tokens out), the Thinking panel shows its own running token count, and once a request has reported its real cost, a rough live $ estimate appears while the model works.
+
 ## 0.1.7
 
 - Deeper native VS Code Chat integration: the configured reasoning effort now applies to 8os models used by VS Code's own Chat agent mode, deprecated models are marked in VS Code's model picker, and token counting covers tool calls and images so context warnings are accurate.
