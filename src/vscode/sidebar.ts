@@ -182,6 +182,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			case 'loadSession':
 				await this.loadSession(message.value ?? '');
 				break;
+			case 'pickModel':
+				await this.services.pickModel();
+				break;
+			case 'setIncludeSelection':
+				await this.context.workspaceState.update('eightbot.includeSelection', message.value !== 'false');
+				await this.postState();
+				break;
 			case 'setModel':
 				if (message.value) { await this.services.setModel(message.value); }
 				break;
@@ -288,6 +295,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			models: models.map(m => ({ id: m.id, name: m.name, efforts: m.reasoningEfforts, contextWindow: m.contextWindow, deprecated: !!m.deprecatedAt })),
 			model: this.services.model,
 			mode: this.services.mode,
+			includeSelection: this.context.workspaceState.get<boolean>('eightbot.includeSelection', true),
 			modes: PERMISSION_MODES,
 			effort: this.services.config.get<string>('reasoningEffort', ''),
 			keys: await this.services.savedKeys().catch(() => []),
@@ -568,7 +576,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		<div class="row">
 			<button id="attach" class="icon secondary" type="button" title="Attach files" aria-label="Attach files">📎</button>
 			<button id="dictate" class="icon secondary" type="button" title="Dictate a message" aria-label="Dictate a message" hidden>🎤</button>
-			<select id="model" aria-label="Model" title="Model"></select>
+			<button id="model" type="button" aria-label="Choose model" title="Search models"><span class="model-symbol" aria-hidden="true">✦</span><span class="model-copy"><span id="modelName">Choose model</span><small id="modelDetail">Search models</small></span><span aria-hidden="true">⌕</span></button>
 			<button id="send" type="button">Send</button>
 			<button id="stop" class="secondary" type="button" hidden>Stop</button>
 		</div>

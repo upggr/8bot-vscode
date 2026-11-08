@@ -33,6 +33,12 @@ Open a folder, type a request such as `Add tests for the date helpers` and press
 
 You can keep typing while 8bot works: messages wait in a queue below the transcript and run in order. Remove a queued message with its × button, or press **Stop** to cancel the current request and clear the queue.
 
+## Model picker and remembered options
+
+Click the model card beside Send to open VS Code's searchable model picker. Search by name, model ID or capabilities; each entry shows its context size, tool/reasoning support and the current selection. Use the arrow keys and Enter to choose, or Escape to cancel.
+
+Your model and reasoning effort survive window reloads. Permission mode and the **include editor selection** checkbox are remembered for this workspace. Bypass still requires confirmation before its first use; once confirmed and selected, it is restored when you reopen that workspace, without enabling it in other projects. Choose **Ask** to turn it off again.
+
 ## Attach files, images and screenshots
 
 Drag a file or image onto the sidebar chat, paste a screenshot from the clipboard, or press the 📎 button to pick files. Text files are included as part of your message. Images are sent to the model only when the selected model can read images; otherwise 8bot tells you so instead of silently dropping it.

@@ -19,7 +19,12 @@ textarea { resize: vertical; box-sizing: border-box; width: 100%; padding: 6px; 
 textarea:focus, select:focus, button:focus, input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 select { -webkit-appearance: none; appearance: none; box-sizing: border-box; height: 26px; max-width: 100%; min-width: 0; padding: 0 24px 0 10px; border-radius: 6px; cursor: pointer; font: inherit; text-overflow: ellipsis; color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); background-color: var(--vscode-dropdown-background); background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: right 13px center, right 9px center; background-size: 4px 4px; background-repeat: no-repeat; }
 select:hover { border-color: var(--vscode-focusBorder); }
-#model { flex: 1 1 120px; }
+#model { flex: 1 1 150px; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 9px; text-align: left; color: var(--vscode-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); }
+#model:hover { border-color: var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); }
+.model-symbol { color: var(--vscode-textLink-foreground); font-size: 1.5em; }
+.model-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+#modelName { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+#modelDetail { color: var(--vscode-descriptionForeground); font-size: 0.8em; }
 #send, #stop { height: 26px; border-radius: 6px; }
 .segmented { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 7px; background: var(--vscode-input-background); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); }
 .segmented button { flex: 1 1 auto; padding: 2px 6px; border-radius: 5px; white-space: nowrap; text-transform: capitalize; font-size: 0.9em; color: var(--vscode-descriptionForeground); background: none; }

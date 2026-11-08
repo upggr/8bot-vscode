@@ -5,7 +5,7 @@ import { addSpend, BUY_URL, creditStatus, CreditStatus, SpendRecord } from '../c
 import { DEFAULT_BASE_URL, GatewayClient, GatewayError, LiveLimit, normalizeBaseUrl } from '../core/gateway';
 import { defaultKeyLabel, KeyState, keyStates, maskKey, StoredKey } from '../core/keyring';
 import { addMemory, readMemory } from '../core/memory';
-import { isPermissionMode, PERMISSION_MODES, PermissionMode } from '../core/permissions';
+import { PERMISSION_MODES, PermissionMode, restorePermissionMode } from '../core/permissions';
 import { ModelInfo } from '../core/types';
 
 const API_KEY_SECRET = 'eightbot.apiKey';
@@ -13,6 +13,7 @@ const API_KEY_SECRET = 'eightbot.apiKey';
 const KEYRING_SECRET = 'eightbot.keyring';
 const PAX8_TOKEN_SECRET = 'eightbot.pax8Token';
 const MODEL_STATE = 'eightbot.model';
+const MODE_STATE = 'eightbot.permissionMode';
 const SPEND_STATE = 'eightbot.spend';
 const BYPASS_ACK_STATE = 'eightbot.bypassAcknowledged';
 
@@ -35,10 +36,10 @@ export class Services implements vscode.Disposable {
 	private activeKey: string | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
-		const configured = this.config.get<string>('permissionMode');
-		const startMode = isPermissionMode(configured) ? configured : 'default';
-		// A setting alone cannot enable bypass until the user has accepted the warning once.
-		this.currentMode = startMode === 'bypassPermissions' && !context.globalState.get(BYPASS_ACK_STATE) ? 'default' : startMode;
+		this.currentMode = restorePermissionMode(
+			context.workspaceState.get(MODE_STATE), this.config.get<string>('permissionMode'),
+			context.globalState.get<boolean>(BYPASS_ACK_STATE) === true,
+		);
 		this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this.status.command = 'eightbot.openChat';
 		this.subscriptions.push(
@@ -337,13 +338,13 @@ export class Services implements vscode.Disposable {
 		const models = await this.models(true);
 		const picked = await vscode.window.showQuickPick(
 			models.map(m => ({
-				label: m.deprecatedAt ? `$(warning) ${m.name}` : m.name,
-				description: m.deprecatedAt ? `${m.id} · deprecated` : m.id,
-				detail: m.description,
+				label: `${m.id === this.model ? '$(check)' : m.deprecatedAt ? '$(warning)' : '$(sparkle)'} ${m.name}`,
+				description: `${m.id}${m.id === this.model ? ' · current' : ''}${m.deprecatedAt ? ' · deprecated' : ''}`,
+				detail: [m.contextWindow ? `${m.contextWindow.toLocaleString()} context tokens` : '', m.supportsTools ? 'Tools' : '', m.reasoningEfforts.length ? 'Reasoning' : '', m.description].filter(Boolean).join(' · '),
 				picked: m.id === this.model,
 				id: m.id,
 			})),
-			{ title: 'Select Model', matchOnDescription: true },
+			{ title: '8bot · Select Model', placeHolder: 'Search models by name, ID or capabilities…', matchOnDescription: true, matchOnDetail: true },
 		);
 		if (picked) { await this.setModel(picked.id); }
 	}
@@ -354,6 +355,8 @@ export class Services implements vscode.Disposable {
 			this.fire();
 			return false;
 		}
+		// Keep elevated permissions scoped to this workspace, not every project the user opens.
+		await this.context.workspaceState.update(MODE_STATE, mode);
 		this.currentMode = mode;
 		this.fire();
 		return true;

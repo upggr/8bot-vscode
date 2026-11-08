@@ -23,7 +23,13 @@ export function decide(mode: PermissionMode, kind: ToolKind): Decision {
 }
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
-	return typeof value === 'string' && value in POLICY;
+	return typeof value === 'string' && Object.hasOwn(POLICY, value);
+}
+
+/** Restore a user's choice without letting a saved/configured value skip bypass consent. */
+export function restorePermissionMode(saved: unknown, configured: unknown, bypassAcknowledged: boolean): PermissionMode {
+	const mode = isPermissionMode(saved) ? saved : isPermissionMode(configured) ? configured : 'default';
+	return mode === 'bypassPermissions' && !bypassAcknowledged ? 'default' : mode;
 }
 
 /**

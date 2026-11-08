@@ -13,7 +13,7 @@ const BODY = `
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
 <div id="status" hidden></div><div id="queue" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
-<button id="attach"></button><select id="model"></select>
+<button id="attach"></button><button id="model"><span id="modelName"></span><small id="modelDetail"></small></button>
 <div id="keyPicker"><button id="keyButton" aria-expanded="false"></button><div id="keyMenu" hidden><div id="keyList"></div><button id="addKey"></button><div id="keyForm" hidden><input id="newKey"><input id="newKeyName"><input id="newKeyGateway"><p id="keyError" hidden></p><button id="saveKey"></button><button id="cancelKey"></button></div></div></div>
 <div id="effort" hidden></div><div id="mode"></div>
 <button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
@@ -85,7 +85,8 @@ test('state fills pickers, per-model effort, credits and context use', () => {
 	const { send, $ } = load();
 	send(STATE);
 	assert.equal($('app').hidden, false);
-	assert.equal($('model').value, 'a');
+	assert.equal($('modelName').textContent, 'A');
+	assert.match($('modelDetail').textContent ?? '', /Reasoning.*Search models/);
 	assert.equal($('effort').hidden, false);
 	assert.equal($('effort').querySelector('[aria-pressed="true"]')?.textContent, 'high');
 	assert.equal($('mode').querySelector('[aria-pressed="true"]')?.textContent, 'Ask first');
@@ -104,9 +105,30 @@ test('sending, model changes and Enter post the right messages', () => {
 	$('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 	assert.deepEqual(posted.at(-1), { type: 'send', text: 'hello', includeSelection: false, attachments: [] });
 	assert.equal($('input').value, '');
-	$('model').value = 'b';
-	$('model').dispatchEvent(new dom.window.Event('change'));
-	assert.deepEqual(posted.at(-1), { type: 'setModel', value: 'b' });
+	$('model').click();
+	assert.deepEqual(posted.at(-1), { type: 'pickModel' });
+	send({ ...STATE, model: 'b' });
+	assert.equal($('modelName').textContent, 'B');
+});
+
+test('selection preference restores from host state and changes are persisted', t => {
+	const { dom, posted, send, $ } = load();
+	t.after(() => dom.window.close());
+	send({ ...STATE, includeSelection: false });
+	const checkbox = $('includeSelection') as unknown as HTMLInputElement;
+	assert.equal(checkbox.checked, false);
+	checkbox.click();
+	assert.deepEqual(posted.at(-1), { type: 'setIncludeSelection', value: 'true' });
+	send({ ...STATE, includeSelection: true });
+	assert.equal(checkbox.checked, true);
+});
+
+test('model names are rendered as text, including unknown saved selections', t => {
+	const { dom, send, $ } = load();
+	t.after(() => dom.window.close());
+	send({ ...STATE, model: '<b>missing</b>' });
+	assert.equal($('modelName').textContent, '<b>missing</b>');
+	assert.equal($('modelName').children.length, 0);
 });
 
 test('effort and mode toggles post new choices and wait for state before changing', () => {

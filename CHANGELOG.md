@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.16
+
+- Remember permission mode (including previously confirmed bypass) and the include-selection checkbox per workspace across window reloads. Model and reasoning effort continue to persist.
+- Replace the plain model dropdown with a themed model card opening VS Code's searchable, keyboard-accessible picker, with the current model, context size and tool/reasoning details.
+
 ## 0.1.15
 
 - The status bar no longer turns red in bypass mode; a chosen permission mode is not an error. It keeps the warning icon, and red is reserved for an empty limit.

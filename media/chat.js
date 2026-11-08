@@ -450,7 +450,12 @@
 		if (!next.hasKey) { closeKeyMenu(); return; }
 
 		const models = next.models.length ? next.models : [{ id: next.model, name: next.model, efforts: [] }];
-		fill($('model'), models.map(m => ({ value: m.id, label: m.deprecated ? '⚠ ' + m.name : m.name })), next.model);
+		const selected = models.find(m => m.id === next.model);
+		$('modelName').textContent = (selected && selected.deprecated ? '⚠ ' : '') + (selected ? selected.name : next.model);
+		$('modelDetail').textContent = [selected && selected.contextWindow ? Math.round(selected.contextWindow / 1000) + 'k context' : '', selected && selected.efforts.length ? 'Reasoning' : '', 'Search models'].filter(Boolean).join(' · ');
+		$('model').title = 'Choose model · ' + next.model;
+		$('model').setAttribute('aria-label', 'Choose model: ' + (selected ? selected.name : next.model));
+		$('includeSelection').checked = next.includeSelection !== false;
 		fillToggle($('mode'), next.modes.map(m => ({ value: m.id, label: m.short || m.label, title: m.label + ': ' + m.detail })), next.mode);
 		$('mode').classList.toggle('danger', next.mode === 'bypassPermissions');
 		drawKeys(next.keys || [], next.keyStatus);
@@ -547,7 +552,8 @@
 	$('closeSetup').addEventListener('click', () => { setupOpen = false; showSetup(false); });
 	$('getSubscription').addEventListener('click', () => post('buy'));
 	$('credits').addEventListener('click', () => post('credits'));
-	$('model').addEventListener('change', e => post('setModel', { value: e.target.value }));
+	$('model').addEventListener('click', () => post('pickModel'));
+	$('includeSelection').addEventListener('change', e => post('setIncludeSelection', { value: String(e.target.checked) }));
 	onToggle($('effort'), 'setEffort');
 	onToggle($('mode'), 'setMode');
 	$('keyButton').addEventListener('click', () => { if ($('keyMenu').hidden) { openKeyMenu(false); } else { closeKeyMenu(); } });

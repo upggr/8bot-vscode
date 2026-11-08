@@ -13,7 +13,7 @@ import { LiveLimit } from '../core/gateway';
 import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
 import { addMemory, readMemory } from '../core/memory';
-import { decide, PermissionMode, rememberKey } from '../core/permissions';
+import { decide, PermissionMode, rememberKey, restorePermissionMode } from '../core/permissions';
 import { buildSystemPrompt } from '../core/prompt';
 import { newSession, SessionStore } from '../core/sessions';
 import { findTool, globToRegExp, isSensitivePath, ToolContext } from '../core/tools';
@@ -266,6 +266,18 @@ test('live limits show the reported currency', () => {
 	const live: LiveLimit = { limit: 20, used: 10.29, remaining: 9.71, reached: false, period: 'monthly', currency: 'EUR' };
 	assert.equal(creditStatus(undefined, 0, live).label, '€9.71 left');
 	assert.match(creditStatus(undefined, 0, live).detail, /€10\.29 used of €20\.00/);
+});
+
+test('permission preferences restore per workspace without bypassing consent', () => {
+	for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions']) {
+		assert.equal(restorePermissionMode(mode, 'default', true), mode);
+	}
+	assert.equal(restorePermissionMode('bypassPermissions', 'default', false), 'default');
+	assert.equal(restorePermissionMode(undefined, 'bypassPermissions', false), 'default');
+	assert.equal(restorePermissionMode(undefined, 'plan', true), 'plan');
+	assert.equal(restorePermissionMode('invalid', 'acceptEdits', true), 'acceptEdits');
+	assert.equal(restorePermissionMode('toString', 'invalid', true), 'default');
+	assert.equal(restorePermissionMode(undefined, undefined, true), 'default', 'another workspace does not inherit bypass');
 });
 
 test('permission policy', () => {
