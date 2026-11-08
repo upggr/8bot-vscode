@@ -25,6 +25,8 @@ export interface LiveLimit {
 	reached: boolean;
 	period?: string;
 	resetsAt?: string;
+	/** ISO currency code when the gateway reports one (e.g. EUR); amounts default to USD. */
+	currency?: string;
 }
 
 const SUSPENSION_MESSAGES: Record<string, string> = {
@@ -110,7 +112,7 @@ export class GatewayClient implements ChatStreamer {
 			throw new GatewayError('The Pax8 token was rejected or has expired.', response.status);
 		}
 		if (!response.ok) { throw new GatewayError(`Could not read limits (${response.status}).`, response.status); }
-		const body = (await response.json()) as { client?: { limits?: { spend?: RawLimit | null } } };
+		const body = (await response.json()) as { client?: { currency?: string; limits?: { spend?: RawLimit | null } } };
 		const spend = body.client?.limits?.spend;
 		if (!spend || spend.limit === null || spend.limit === undefined) { return undefined; }
 		const used = spend.currentUsage ?? 0;
@@ -121,6 +123,7 @@ export class GatewayClient implements ChatStreamer {
 			reached: spend.reached ?? false,
 			period: spend.period ?? undefined,
 			resetsAt: spend.periodResetTime ?? undefined,
+			currency: spend.currency ?? body.client?.currency ?? undefined,
 		};
 	}
 
@@ -305,6 +308,7 @@ interface RawLimit {
 	reached?: boolean;
 	period?: string | null;
 	periodResetTime?: string | null;
+	currency?: string | null;
 }
 
 /** The gateway's automatic routing intermittently picks a provider that refuses the request. */

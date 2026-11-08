@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.14
+
+- More accurate spend figures: the locally counted monthly spend is now tracked per API key, so switching keys no longer mixes spend from different accounts into one number. The live Pax8 limit is refreshed immediately when you switch keys, and it is shown in the currency the gateway reports (e.g. €) instead of always $.
+
 ## 0.1.13
 
 - Long chats are summarized automatically as they near the gateway's size limit, so older context is condensed instead of left out. Models with very large context windows reach that limit long before their token limit.

@@ -9,6 +9,7 @@ import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } fro
 import { buildAttachedContent, canReadImages, truncateAttachmentText } from '../core/attachments';
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
+import { LiveLimit } from '../core/gateway';
 import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
 import { addMemory, readMemory } from '../core/memory';
@@ -249,6 +250,22 @@ test('local credits reset each month and show what is left', () => {
 	assert.equal(creditStatus(record, 3, undefined, october).level, 'empty');
 	assert.equal(creditStatus(record, 0, undefined, october).label, '$3.00 this month');
 	assert.equal(creditStatus(record, 5, undefined, november).label, '$5.00 left');
+});
+
+test('local spend is tracked per key so a key switch does not mix accounts', () => {
+	const now = new Date('2026-11-08T12:00:00Z');
+	const firstKey = addSpend(addSpend(undefined, 10, now, 'sk-pax8-'), 5, now, 'sk-pax8-');
+	assert.equal(firstKey.total, 15);
+	// The same record read as another key shows nothing, and a spend on the other key starts over.
+	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax9-').label, '$0.00 this month');
+	assert.equal(addSpend(firstKey, 2, now, 'sk-pax9-').total, 2);
+	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax8-').label, '$15.00 this month');
+});
+
+test('live limits show the reported currency', () => {
+	const live: LiveLimit = { limit: 20, used: 10.29, remaining: 9.71, reached: false, period: 'monthly', currency: 'EUR' };
+	assert.equal(creditStatus(undefined, 0, live).label, '€9.71 left');
+	assert.match(creditStatus(undefined, 0, live).detail, /€10\.29 used of €20\.00/);
 });
 
 test('permission policy', () => {

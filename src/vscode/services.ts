@@ -31,6 +31,8 @@ export class Services implements vscode.Disposable {
 	private liveLimit: LiveLimit | undefined;
 	private keyPresent = false;
 	private keyHealth: 'ok' | 'rejected' | 'unknown' = 'unknown';
+	/** Sync cache of the stored key, refreshed in keyChanged, so sync getters can fingerprint it. */
+	private activeKey: string | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		const configured = this.config.get<string>('permissionMode');
@@ -92,7 +94,12 @@ export class Services implements vscode.Disposable {
 	}
 
 	get credits(): CreditStatus {
-		return creditStatus(this.context.globalState.get<SpendRecord>(SPEND_STATE), this.config.get<number>('monthlySpendLimit', 0), this.liveLimit);
+		return creditStatus(this.context.globalState.get<SpendRecord>(SPEND_STATE), this.config.get<number>('monthlySpendLimit', 0), this.liveLimit, new Date(), this.activeKeyId);
+	}
+
+	/** Fingerprint of the active key, so local spend is not mixed across keys. */
+	private get activeKeyId(): string | undefined {
+		return this.activeKey?.slice(0, 8);
 	}
 
 	async getApiKey(): Promise<string | undefined> {
@@ -234,6 +241,9 @@ export class Services implements vscode.Disposable {
 			await this.config.update('baseUrl', chosen.gateway, vscode.ConfigurationTarget.Global);
 		}
 		await this.context.secrets.store(API_KEY_SECRET, chosen.key);
+		// The secret-change listener also refreshes, but refresh the live limit with the new key explicitly:
+		// a different key can mean a different account, and the config listener does not fire when the gateway stayed the same.
+		await this.refreshLiveCredits();
 	}
 
 	/** Removes a saved key. If it is the one in use, 8bot moves to another saved key, or to setup when none is left. */
@@ -381,7 +391,7 @@ export class Services implements vscode.Disposable {
 
 	private async recordCost(cost: number): Promise<void> {
 		const before = this.credits.level;
-		await this.context.globalState.update(SPEND_STATE, addSpend(this.context.globalState.get<SpendRecord>(SPEND_STATE), cost));
+		await this.context.globalState.update(SPEND_STATE, addSpend(this.context.globalState.get<SpendRecord>(SPEND_STATE), cost, new Date(), this.activeKeyId));
 		this.fire();
 		const after = this.credits;
 		if (after.level !== before && after.level !== 'ok') {
@@ -392,6 +402,7 @@ export class Services implements vscode.Disposable {
 	}
 
 	private async keyChanged(): Promise<void> {
+		this.activeKey = await this.context.secrets.get(API_KEY_SECRET);
 		this.keyPresent = !!(await this.getApiKey());
 		this.cachedModels = undefined;
 		this.keyHealth = 'unknown';

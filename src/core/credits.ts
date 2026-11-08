@@ -6,6 +6,8 @@ export interface SpendRecord {
 	/** Calendar month as YYYY-MM. */
 	month: string;
 	total: number;
+	/** Key fingerprint (first 8 chars) this total belongs to, so a key switch does not mix accounts. */
+	keyId?: string;
 }
 
 export type CreditLevel = 'ok' | 'low' | 'empty';
@@ -23,13 +25,17 @@ export function currentMonth(now = new Date()): string {
 	return now.toISOString().slice(0, 7);
 }
 
-export function addSpend(record: SpendRecord | undefined, cost: number, now = new Date()): SpendRecord {
+export function addSpend(record: SpendRecord | undefined, cost: number, now = new Date(), keyId?: string): SpendRecord {
 	const month = currentMonth(now);
-	return { month, total: (record?.month === month ? record.total : 0) + cost };
+	const same = record?.month === month && record?.keyId === keyId;
+	return { month, total: (same ? record.total : 0) + cost, keyId };
 }
 
-export function money(value: number): string {
-	return `$${value < 1 && value > 0 ? value.toFixed(4) : value.toFixed(2)}`;
+const SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', GBP: '£' };
+
+export function money(value: number, currency?: string): string {
+	const symbol = (currency && SYMBOLS[currency.toUpperCase()]) ?? (currency ? `${currency.toUpperCase()} ` : '$');
+	return `${symbol}${value < 1 && value > 0 ? value.toFixed(4) : value.toFixed(2)}`;
 }
 
 function level(remaining: number, limit: number): CreditLevel {
@@ -38,29 +44,30 @@ function level(remaining: number, limit: number): CreditLevel {
 }
 
 /** Prefers the live Pax8 limit. Otherwise compares local spend with the user's own limit. */
-export function creditStatus(record: SpendRecord | undefined, userLimit: number, live?: LiveLimit, now = new Date()): CreditStatus {
+export function creditStatus(record: SpendRecord | undefined, userLimit: number, live?: LiveLimit, now = new Date(), keyId?: string): CreditStatus {
 	if (live) {
 		const reset = live.resetsAt ? ` Resets ${live.resetsAt.slice(0, 10)}.` : '';
 		return {
-			label: `${money(live.remaining)} left`,
-			detail: `Live Pax8 limit: ${money(live.used)} used of ${money(live.limit)}${live.period ? ` (${live.period})` : ''}.${reset}`,
+			label: `${money(live.remaining, live.currency)} left`,
+			detail: `Live Pax8 limit: ${money(live.used, live.currency)} used of ${money(live.limit, live.currency)}${live.period ? ` (${live.period})` : ''}.${reset}`,
 			level: live.reached ? 'empty' : level(live.remaining, live.limit),
 			live: true,
 		};
 	}
-	const spent = record?.month === currentMonth(now) ? record.total : 0;
+	// The local counter is per key and per month; an old key's or month's record is not this key's spend.
+	const spent = record?.month === currentMonth(now) && record.keyId === keyId ? record.total : 0;
 	if (userLimit > 0) {
 		const remaining = Math.max(userLimit - spent, 0);
 		return {
 			label: `${money(remaining)} left`,
-			detail: `${money(spent)} of your ${money(userLimit)} monthly limit, counted on this computer from gateway costs.`,
+			detail: `${money(spent)} of your ${money(userLimit)} monthly limit, counted on this computer from gateway costs, for this key only.`,
 			level: level(remaining, userLimit),
 			live: false,
 		};
 	}
 	return {
 		label: `${money(spent)} this month`,
-		detail: 'Counted on this computer from gateway costs. API keys cannot read the account balance. Connect a Pax8 account or set a monthly limit to see what is left.',
+		detail: 'Counted on this computer from gateway costs, for the current key only. API keys cannot read the account balance. Connect a Pax8 account or set a monthly limit to see what is left.',
 		level: 'ok',
 		live: false,
 	};
