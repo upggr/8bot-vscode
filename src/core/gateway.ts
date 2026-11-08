@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { byteSize, fitRequestSize, MAX_REQUEST_BYTES } from './requestSize';
 import { ChatRequest, ChatStreamer, ModelInfo, StreamEvent, ToolCall, Usage } from './types';
 
 export const DEFAULT_BASE_URL = 'https://api.8os.com';
@@ -126,7 +127,7 @@ export class GatewayClient implements ChatStreamer {
 	private postChat(request: ChatRequest, model: string, signal?: AbortSignal): Promise<Response> {
 		const body: Record<string, unknown> = {
 			model,
-			messages: request.messages,
+			messages: [],
 			stream: true,
 			stream_options: { include_usage: true },
 		};
@@ -136,11 +137,17 @@ export class GatewayClient implements ChatStreamer {
 		}
 		if (request.maxTokens) { body.max_tokens = request.maxTokens; }
 		if (request.reasoningEffort) { body.reasoning_effort = request.reasoningEffort; }
+		body.messages = fitRequestSize(request.messages, byteSize(body));
+		const payload = JSON.stringify(body);
+		const size = Buffer.byteLength(payload);
+		if (size > MAX_REQUEST_BYTES) {
+			throw new GatewayError(`This message is too large to send (${(size / 1_000_000).toFixed(1)} MB). The gateway accepts about 1 MB per request, so attach fewer or smaller files.`);
+		}
 		return this.send('/v1/chat/completions', {
 			method: 'POST',
 			// One key across retries, so a retried request is not billed twice.
 			headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Idempotency-Key': uuidV7() },
-			body: JSON.stringify(body),
+			body: payload,
 			signal,
 		});
 	}
@@ -246,6 +253,7 @@ export class GatewayClient implements ChatStreamer {
 		if (this.taskHint) { headers['X-Pax8-Task'] = this.taskHint; }
 		if (this.agentId) { headers['X-Pax8-Agent-ID'] = this.agentId; }
 		if (this.feature) { headers['X-Pax8-Feature'] = this.feature; }
+		let freshKeyTried = false;
 		for (let attempt = 0; ; attempt++) {
 			let response: Response;
 			try {
@@ -259,6 +267,12 @@ export class GatewayClient implements ChatStreamer {
 				continue;
 			}
 			if (response.ok) { return response; }
+			// The gateway also answers 401 when an idempotency key is reused, so a retry gets one fresh key.
+			if (response.status === 401 && attempt > 0 && headers['Idempotency-Key'] && !freshKeyTried) {
+				freshKeyTried = true;
+				headers['Idempotency-Key'] = uuidV7();
+				continue;
+			}
 			if (RETRYABLE.has(response.status) && attempt < MAX_RETRIES) {
 				const text = await response.text().catch(() => '');
 				if (response.status === 429 && LIMIT_TEXT.test(text)) { throw this.toError(response.status, text); }

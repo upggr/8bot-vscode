@@ -81,11 +81,16 @@
 		});
 	}
 
-	function drawKeys(keys) {
+	const KEY_STATUS = { ok: 'API key working', rejected: 'API key rejected', unknown: 'API key not checked yet' };
+
+	function drawKeys(keys, status) {
 		const active = keys.find(k => k.active);
-		const name = !active ? 'Key from environment' : active.label === active.masked ? active.masked : active.label + ' · ' + active.masked;
-		$('keyName').textContent = name;
-		$('keyButton').title = active ? 'API key: ' + name + ' on ' + active.gateway : 'API key';
+		const name = !active ? 'from environment' : active.label === active.masked ? active.masked : active.label + ' · ' + active.masked;
+		const health = KEY_STATUS[status] ? status : 'unknown';
+		const button = $('keyButton');
+		button.className = health;
+		button.title = KEY_STATUS[health] + ': ' + name;
+		button.setAttribute('aria-label', button.title);
 		$('keyList').replaceChildren(...keys.map(key => {
 			const row = element('div', key.active ? 'key-item active' : 'key-item');
 			const pick = element('button', 'key-pick');
@@ -450,7 +455,7 @@
 		fill($('model'), models.map(m => ({ value: m.id, label: m.deprecated ? '⚠ ' + m.name : m.name })), next.model);
 		fillToggle($('mode'), next.modes.map(m => ({ value: m.id, label: m.short || m.label, title: m.label + ': ' + m.detail })), next.mode);
 		$('mode').classList.toggle('danger', next.mode === 'bypassPermissions');
-		drawKeys(next.keys || []);
+		drawKeys(next.keys || [], next.keyStatus);
 
 		const current = models.find(m => m.id === next.model);
 		const efforts = current ? current.efforts : [];

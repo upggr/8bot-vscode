@@ -291,6 +291,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			modes: PERMISSION_MODES,
 			effort: this.services.config.get<string>('reasoningEffort', ''),
 			keys: await this.services.savedKeys().catch(() => []),
+			keyStatus: this.services.keyStatus,
 			sessions: await this.store.list(),
 			sessionId: this.session.id,
 			busy: this.abort !== undefined,
@@ -364,8 +365,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				signal: abort.signal,
 			});
 		} catch (error) {
-			const limitOrKey = error instanceof GatewayError && (error.limitReached || error.status === 401);
-			this.post({ type: 'event', event: { type: 'error', message: (error as Error).message, showBuy: limitOrKey } });
+			const unauthorized = error instanceof GatewayError && error.status === 401;
+			const keyWorks = unauthorized && await services.keyStillWorks();
+			const limitOrKey = error instanceof GatewayError && (error.limitReached || (unauthorized && !keyWorks));
+			const message = keyWorks ? 'The gateway refused this request (401), but your API key is working. Retry, or start a new chat if it keeps happening.' : (error as Error).message;
+			this.post({ type: 'event', event: { type: 'error', message, showBuy: limitOrKey } });
 		} finally {
 			this.abort = undefined;
 			this.session.updatedAt = Date.now();
@@ -568,29 +572,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			<button id="send" type="button">Send</button>
 			<button id="stop" class="secondary" type="button" hidden>Stop</button>
 		</div>
-		<div id="keyPicker">
-			<button id="keyButton" type="button" title="API key" aria-label="API key" aria-haspopup="true" aria-expanded="false">
-				<svg class="key-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.5 1a4.5 4.5 0 0 0-4.36 5.63L1.15 11.6a.5.5 0 0 0-.15.36V14.5a.5.5 0 0 0 .5.5h2.75a.5.5 0 0 0 .5-.5V13h1.5a.5.5 0 0 0 .5-.5V11h1.5a.5.5 0 0 0 .35-.15l.77-.77A4.5 4.5 0 1 0 10.5 1Zm1 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
-				<span id="keyName"></span>
-			</button>
-			<div id="keyMenu" hidden>
-				<div id="keyList"></div>
-				<button id="addKey" class="link" type="button">+ Add a key</button>
-				<div id="keyForm" hidden>
-					<input id="newKey" type="password" spellcheck="false" autocomplete="off" placeholder="API key (sk-pax8-...)" aria-label="API key">
-					<input id="newKeyName" type="text" spellcheck="false" autocomplete="off" placeholder="Name (optional), e.g. Work" aria-label="Name for this key">
-					<input id="newKeyGateway" type="url" spellcheck="false" autocomplete="off" placeholder="Gateway URL" aria-label="Gateway URL">
-					<p id="keyError" class="error-text" role="alert" hidden></p>
-					<div class="row">
-						<button id="saveKey" type="button">Save and use</button>
-						<button id="cancelKey" class="secondary" type="button">Cancel</button>
-					</div>
-				</div>
-			</div>
-		</div>
 		<div id="effort" class="segmented" role="group" aria-label="Reasoning effort" hidden></div>
 		<div id="mode" class="segmented" role="group" aria-label="Permission mode"></div>
 		<div class="row meta">
+			<div id="keyPicker">
+				<button id="keyButton" class="unknown" type="button" title="API key" aria-label="API key" aria-haspopup="true" aria-expanded="false">
+					<svg class="key-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.5 1a4.5 4.5 0 0 0-4.36 5.63L1.15 11.6a.5.5 0 0 0-.15.36V14.5a.5.5 0 0 0 .5.5h2.75a.5.5 0 0 0 .5-.5V13h1.5a.5.5 0 0 0 .5-.5V11h1.5a.5.5 0 0 0 .35-.15l.77-.77A4.5 4.5 0 1 0 10.5 1Zm1 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+				</button>
+				<div id="keyMenu" hidden>
+					<div id="keyList"></div>
+					<button id="addKey" class="link" type="button">+ Add a key</button>
+					<div id="keyForm" hidden>
+						<input id="newKey" type="password" spellcheck="false" autocomplete="off" placeholder="API key (sk-pax8-...)" aria-label="API key">
+						<input id="newKeyName" type="text" spellcheck="false" autocomplete="off" placeholder="Name (optional), e.g. Work" aria-label="Name for this key">
+						<input id="newKeyGateway" type="url" spellcheck="false" autocomplete="off" placeholder="Gateway URL" aria-label="Gateway URL">
+						<p id="keyError" class="error-text" role="alert" hidden></p>
+						<div class="row">
+							<button id="saveKey" type="button">Save and use</button>
+							<button id="cancelKey" class="secondary" type="button">Cancel</button>
+						</div>
+					</div>
+				</div>
+			</div>
 			<button id="credits" class="link" type="button"></button>
 			<span id="contextUsage"></span>
 		</div>

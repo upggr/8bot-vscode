@@ -30,6 +30,7 @@ export class Services implements vscode.Disposable {
 	private currentMode: PermissionMode;
 	private liveLimit: LiveLimit | undefined;
 	private keyPresent = false;
+	private keyHealth: 'ok' | 'rejected' | 'unknown' = 'unknown';
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		const configured = this.config.get<string>('permissionMode');
@@ -282,8 +283,25 @@ export class Services implements vscode.Disposable {
 		if (this.cachedModels && !force) { return this.cachedModels; }
 		const apiKey = await this.getApiKey();
 		if (!apiKey) { return []; }
-		this.cachedModels = await this.buildClient(apiKey, 'sidebar').listModels();
+		try {
+			this.cachedModels = await this.buildClient(apiKey, 'sidebar').listModels();
+			this.keyHealth = 'ok';
+		} catch (error) {
+			this.keyHealth = error instanceof GatewayError && error.status === 401 ? 'rejected' : 'unknown';
+			throw error;
+		}
 		return this.cachedModels;
+	}
+
+	/** Whether the gateway accepted the active key the last time it was asked. */
+	get keyStatus(): 'ok' | 'rejected' | 'unknown' {
+		return this.keyHealth;
+	}
+
+	/** Asks the gateway again, because a 401 on a chat request does not always mean a bad key. */
+	async keyStillWorks(): Promise<boolean> {
+		await this.models(true).catch(() => undefined);
+		return this.keyHealth === 'ok';
 	}
 
 	async modelInfo(id: string): Promise<ModelInfo | undefined> {
@@ -367,6 +385,7 @@ export class Services implements vscode.Disposable {
 	private async keyChanged(): Promise<void> {
 		this.keyPresent = !!(await this.getApiKey());
 		this.cachedModels = undefined;
+		this.keyHealth = 'unknown';
 		this.modelsChanged.fire();
 		await this.refreshLiveCredits();
 		this.fire();

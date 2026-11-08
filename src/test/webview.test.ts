@@ -14,7 +14,7 @@ const BODY = `
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
 <div id="status" hidden></div><div id="queue" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
 <button id="attach"></button><select id="model"></select>
-<div id="keyPicker"><button id="keyButton" aria-expanded="false"><span id="keyName"></span></button><div id="keyMenu" hidden><div id="keyList"></div><button id="addKey"></button><div id="keyForm" hidden><input id="newKey"><input id="newKeyName"><input id="newKeyGateway"><p id="keyError" hidden></p><button id="saveKey"></button><button id="cancelKey"></button></div></div></div>
+<div id="keyPicker"><button id="keyButton" aria-expanded="false"></button><div id="keyMenu" hidden><div id="keyList"></div><button id="addKey"></button><div id="keyForm" hidden><input id="newKey"><input id="newKeyName"><input id="newKeyGateway"><p id="keyError" hidden></p><button id="saveKey"></button><button id="cancelKey"></button></div></div></div>
 <div id="effort" hidden></div><div id="mode"></div>
 <button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
 </main>`;
@@ -24,6 +24,7 @@ const STATE = {
 	models: [{ id: 'a', name: 'A', efforts: ['low', 'high'], contextWindow: 100 }, { id: 'b', name: 'B', efforts: [], contextWindow: 100 }],
 	model: 'a', mode: 'default', effort: 'high',
 	modes: [{ id: 'default', label: 'Ask first', detail: '' }, { id: 'bypassPermissions', label: 'Bypass', detail: '' }],
+	keyStatus: 'ok',
 	keys: [
 		{ id: 'k1', label: 'Work', masked: 'sk-pax8-…aaaa', gateway: 'https://api.8os.com', active: true },
 		{ id: 'k2', label: 'sk-pax8-…bbbb', masked: 'sk-pax8-…bbbb', gateway: 'https://other.example', active: false },
@@ -124,7 +125,8 @@ test('effort and mode toggles post new choices and wait for state before changin
 test('the key picker shows the active key and switches, forgets and adds keys', () => {
 	const { dom, posted, send, $, win } = load();
 	send(STATE);
-	assert.equal($('keyName').textContent, 'Work · sk-pax8-…aaaa');
+	assert.equal($('keyButton').className, 'ok');
+	assert.equal($('keyButton').title, 'API key working: Work · sk-pax8-…aaaa');
 	assert.equal($('keyMenu').hidden, true);
 	$('keyButton').click();
 	assert.equal($('keyMenu').hidden, false);

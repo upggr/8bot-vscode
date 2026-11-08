@@ -18,6 +18,7 @@ import { newSession, SessionStore } from '../core/sessions';
 import { findTool, globToRegExp, isSensitivePath, ToolContext } from '../core/tools';
 import { ChatMessage, ChatStreamer, ContentPart, StreamEvent, ToolCall } from '../core/types';
 import { defaultKeyLabel, keyStates, maskKey } from '../core/keyring';
+import { byteSize, fitRequestSize, MAX_REQUEST_BYTES } from '../core/requestSize';
 
 const KEY = 'sk-pax8-testkey';
 
@@ -537,6 +538,63 @@ test('key masking shows just enough to tell keys apart', () => {
 	assert.equal(maskKey('sk-pax8-1b8260744efa9a734dae8c78aada785d'), 'sk-pax8-…785d');
 	assert.equal(maskKey('short'), '••••');
 	assert.equal(defaultKeyLabel('sk-pax8-209d7b92e43c4a8ea77964fd0e6d3d28'), 'sk-pax8-…3d28');
+});
+
+test('oversized requests give up old images first and keep the newest that fit', () => {
+	const image = (kb: number): ChatMessage => ({ role: 'user', content: [{ type: 'text', text: 'see' }, { type: 'image_url', image_url: { url: 'd'.repeat(kb * 1000) } }] });
+	const history: ChatMessage[] = [{ role: 'system', content: 'sys' }, image(600), { role: 'assistant', content: 'ok' }, image(500), { role: 'user', content: '?' }];
+	const small: ChatMessage[] = [{ role: 'user', content: 'hi' }];
+	assert.equal(fitRequestSize(small), small, 'small requests pass through');
+	const fitted = fitRequestSize(history);
+	assert.ok(byteSize(fitted) <= MAX_REQUEST_BYTES);
+	assert.match(JSON.stringify(fitted[1]), /removed/);
+	assert.ok(JSON.stringify(fitted[3]).includes('ddd'), 'the newer image still fits');
+	assert.ok(JSON.stringify(history[1]).includes('ddd'), 'the stored chat is untouched');
+});
+
+test('oversized requests drop whole old turns so tool results keep their calls', () => {
+	const call = { id: 'c', type: 'function' as const, function: { name: 'x', arguments: '{}' } };
+	const big = 'y'.repeat(300_000);
+	const history: ChatMessage[] = [{ role: 'system', content: 'sys' }];
+	for (let i = 0; i < 6; i++) {
+		history.push({ role: 'user', content: big }, { role: 'assistant', content: null, tool_calls: [call] }, { role: 'tool', tool_call_id: 'c', content: 'r' });
+	}
+	history.push({ role: 'user', content: 'latest' });
+	const fitted = fitRequestSize(history);
+	assert.ok(byteSize(fitted) <= MAX_REQUEST_BYTES);
+	assert.equal(fitted[0].role, 'system');
+	assert.equal(fitted[1].role, 'user');
+	assert.equal(fitted.at(-1)?.content, 'latest');
+});
+
+test('a retry refused for a reused idempotency key is sent once more with a fresh key', async () => {
+	const keys: string[] = [];
+	const replies = [503, 401, 200];
+	const fetchImpl = (async (_url: string, init: RequestInit) => {
+		keys.push((init.headers as Record<string, string>)['Idempotency-Key']);
+		const status = replies.shift() ?? 401;
+		return new Response(status === 200 ? 'data: [DONE]\n\n' : '{}', { status });
+	}) as unknown as typeof fetch;
+	for await (const event of client({ fetchImpl }).streamChat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] })) { assert.ok(event); }
+	assert.equal(keys.length, 3);
+	assert.equal(keys[0], keys[1], 'a normal retry keeps its key so it is not billed twice');
+	assert.notEqual(keys[1], keys[2]);
+});
+
+test('the gateway never receives a request over the size limit', async () => {
+	const bodies: string[] = [];
+	const fetchImpl = (async (_url: string, init: RequestInit) => {
+		bodies.push(String(init.body));
+		return new Response('data: [DONE]\n\n', { status: 200 });
+	}) as unknown as typeof fetch;
+	const client = new GatewayClient({ baseUrl: 'https://api.8os.com', apiKey: KEY, fetchImpl });
+	const old: ChatMessage = { role: 'user', content: 'z'.repeat(800_000) };
+	for await (const event of client.streamChat({ model: 'm', messages: [old, { role: 'assistant', content: 'a' }, { ...old }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'now' }] })) { assert.ok(event); }
+	assert.ok(Buffer.byteLength(bodies[0]) <= MAX_REQUEST_BYTES);
+	assert.ok(bodies[0].includes('"now"'));
+	const consume = async () => { for await (const event of client.streamChat({ model: 'm', messages: [{ role: 'user', content: 'z'.repeat(2_000_000) }] })) { assert.ok(event); } };
+	await assert.rejects(consume, /too large to send/);
+	assert.equal(bodies.length, 1, 'an impossible request is not sent');
 });
 
 test('key states for the chat view never carry the key itself', () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Fix "The gateway rejected your API key (401)" on long chats with a working key. The gateway answers 401 to any request over about 1 MB, so 8bot now keeps requests under that by leaving out old images first, then old tool output, then the oldest turns. The saved chat is not changed.
+- Retries after a brief server error no longer fail with the same false 401, and a 401 now only blames your key if the gateway really rejects it.
+- The API key control is now a small key icon next to the spend figure: green when the key works, red when it is rejected, grey until checked. Click it to switch, add or forget keys.
+
 ## 0.1.11
 
 - Pick or add an API key right in the chat: a key button under the model picker shows which key is active, switches between saved keys, adds a new one and forgets old ones. Keys saved before 0.1.10 now appear there too, and the chat view only ever receives masked keys.
