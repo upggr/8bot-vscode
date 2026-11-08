@@ -26,6 +26,10 @@ export interface Usage {
 	cost?: number;
 	/** Input tokens served from the prompt cache. */
 	cachedTokens?: number;
+	/** Output tokens the model spent on hidden reasoning, when the gateway reports it. */
+	reasoningTokens?: number;
+	/** Input tokens written into the prompt cache on this request. */
+	cacheWriteTokens?: number;
 	/** The model that actually answered, which matters when routing with `auto`. */
 	model?: string;
 }
@@ -40,6 +44,8 @@ export interface ModelInfo {
 	supportsTools: boolean;
 	supportsImages: boolean;
 	reasoningEfforts: string[];
+	/** Set when the provider has deprecated this model, from `deprecationInfo.deprecatedAt`. */
+	deprecatedAt?: string;
 }
 
 export type StreamEvent =

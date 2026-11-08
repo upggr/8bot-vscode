@@ -333,11 +333,20 @@ interface RawUsage {
 	completion_tokens?: number;
 	cost?: number;
 	cache_read_input_tokens?: number;
-	prompt_tokens_details?: { cached_tokens?: number };
+	prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number; cache_creation_tokens?: number };
+	completion_tokens_details?: { reasoning_tokens?: number };
 }
 
 function toUsage(raw: RawUsage, model?: string): Usage {
-	return { promptTokens: raw.prompt_tokens ?? 0, completionTokens: raw.completion_tokens ?? 0, cost: raw.cost, cachedTokens: raw.prompt_tokens_details?.cached_tokens ?? raw.cache_read_input_tokens, model };
+	return {
+		promptTokens: raw.prompt_tokens ?? 0,
+		completionTokens: raw.completion_tokens ?? 0,
+		cost: raw.cost,
+		cachedTokens: raw.prompt_tokens_details?.cached_tokens ?? raw.cache_read_input_tokens,
+		cacheWriteTokens: raw.prompt_tokens_details?.cache_write_tokens ?? raw.prompt_tokens_details?.cache_creation_tokens,
+		reasoningTokens: raw.completion_tokens_details?.reasoning_tokens,
+		model,
+	};
 }
 
 /** The gateway requires UUID v7 for Idempotency-Key. */
@@ -391,6 +400,7 @@ function toModelInfo(raw: unknown): ModelInfo | undefined {
 		id?: string; display_name?: string; displayName?: string; modelFamily?: string; description?: string;
 		contextWindow?: number; max_input_tokens?: number; maxOutputTokens?: number; lifecycleStatus?: string;
 		capabilities?: string[]; inputModalities?: string[]; features?: { tools?: boolean; vision?: boolean; reasoningEfforts?: string[] };
+		deprecationInfo?: { deprecatedAt?: string | null; sunsetAt?: string | null; replacedBy?: string | null } | null;
 	};
 	if (!m.id) { return undefined; }
 	if (m.lifecycleStatus && m.lifecycleStatus !== 'ACTIVE') { return undefined; }
@@ -405,5 +415,6 @@ function toModelInfo(raw: unknown): ModelInfo | undefined {
 		supportsTools: m.features?.tools ?? true,
 		supportsImages: (m.features?.vision ?? false) || (m.inputModalities?.includes('IMAGE') ?? false),
 		reasoningEfforts: m.features?.reasoningEfforts ?? [],
+		deprecatedAt: m.deprecationInfo?.deprecatedAt ?? undefined,
 	};
 }

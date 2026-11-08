@@ -60,7 +60,10 @@ async function handle(
 		return {};
 	}
 	const mode = override ?? services.mode;
-	const model = request.model.vendor === VENDOR ? request.model.id : services.model;
+	const picked = request.model.vendor === VENDOR ? request.model.id : services.model;
+	const planModel = mode === 'plan' ? services.config.get<string>('planModel') : undefined;
+	const model = planModel || picked;
+	if (planModel && planModel !== picked) { stream.markdown(`> Plan mode is using \`${planModel}\`.\n\n`); }
 	const info = await services.modelInfo(model);
 	const effort = services.config.get<string>('reasoningEffort', '');
 	const messages: ChatMessage[] = [...historyMessages(chatContext), { role: 'user', content: await withReferences(request) }];

@@ -150,6 +150,6 @@ test('transcript redraw and streamed text render', async () => {
 	assert.match($('transcript').textContent ?? '', /streamed/);
 	send({ type: 'transcript', items: [{ kind: 'notice', text: 'Older messages above were summarized' }] });
 	assert.match($('transcript').querySelector('.notice')?.textContent ?? '', /summarized/);
-	send({ type: 'event', event: { type: 'usage', usage: { promptTokens: 40, cachedTokens: 30 } } });
-	assert.match($('contextUsage').title, /40 of 100 tokens, 30 from cache/);
+	send({ type: 'event', event: { type: 'usage', usage: { promptTokens: 40, cachedTokens: 30, cacheWriteTokens: 5, reasoningTokens: 7, cost: 0.00000418 } } });
+	assert.match($('contextUsage').title, /40 of 100 prompt tokens, 30 from cache, 5 written to cache, 7 reasoning, cost \$0\.000004/);
 });

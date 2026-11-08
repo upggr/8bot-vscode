@@ -192,7 +192,7 @@
 			}
 			case 'usage':
 				if (event.usage.model && state.model === 'auto') { $('model').title = 'Routed to ' + event.usage.model; }
-				showContext(event.usage.promptTokens, event.usage.cachedTokens);
+				showContext(event.usage);
 				break;
 			case 'notice':
 				endAssistant();
@@ -307,11 +307,18 @@
 		});
 	}
 
-	function showContext(tokens, cached) {
+	function showContext(usage) {
+		const tokens = typeof usage === 'number' ? usage : usage && usage.promptTokens;
 		const model = (state.models || []).find(m => m.id === state.model);
 		const meter = $('contextUsage');
 		meter.textContent = tokens && model ? Math.min(100, Math.round(tokens / model.contextWindow * 100)) + '% context' : '';
-		meter.title = tokens && model ? tokens.toLocaleString() + ' of ' + model.contextWindow.toLocaleString() + ' tokens' + (cached ? ', ' + cached.toLocaleString() + ' from cache' : '') : '';
+		if (!tokens || !model) { meter.title = ''; return; }
+		const parts = [tokens.toLocaleString() + ' of ' + model.contextWindow.toLocaleString() + ' prompt tokens'];
+		if (usage.cachedTokens) { parts.push(usage.cachedTokens.toLocaleString() + ' from cache'); }
+		if (usage.cacheWriteTokens) { parts.push(usage.cacheWriteTokens.toLocaleString() + ' written to cache'); }
+		if (usage.reasoningTokens) { parts.push(usage.reasoningTokens.toLocaleString() + ' reasoning'); }
+		if (usage.cost) { parts.push('cost $' + (usage.cost < 0.01 ? usage.cost.toFixed(6) : usage.cost.toFixed(4))); }
+		meter.title = parts.join(', ');
 	}
 
 	function applyState(next) {
@@ -323,7 +330,7 @@
 		if (!next.hasKey) { return; }
 
 		const models = next.models.length ? next.models : [{ id: next.model, name: next.model, efforts: [] }];
-		fill($('model'), models.map(m => ({ value: m.id, label: m.name })), next.model);
+		fill($('model'), models.map(m => ({ value: m.id, label: m.deprecated ? '⚠ ' + m.name : m.name })), next.model);
 		fill($('mode'), next.modes.map(m => ({ value: m.id, label: m.label, title: m.detail })), next.mode);
 		$('mode').classList.toggle('danger', next.mode === 'bypassPermissions');
 

@@ -289,6 +289,12 @@
           "scope": "application",
           "description": "Pax8 client account ID used to read live spend limits. Needs a connected Pax8 token."
         },
+        "eightbot.planModel": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Optional model to use while in plan mode, for example a cheaper one. Empty always uses the selected model."
+        },
         "eightbot.taskHint": {
           "type": "string",
           "default": "",

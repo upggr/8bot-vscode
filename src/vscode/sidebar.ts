@@ -228,7 +228,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			hasKey: this.services.hasKey,
 			gateway: this.services.baseUrl,
 			buyUrl: BUY_URL,
-			models: models.map(m => ({ id: m.id, name: m.name, efforts: m.reasoningEfforts, contextWindow: m.contextWindow })),
+			models: models.map(m => ({ id: m.id, name: m.name, efforts: m.reasoningEfforts, contextWindow: m.contextWindow, deprecated: !!m.deprecatedAt })),
 			model: this.services.model,
 			mode: this.services.mode,
 			modes: PERMISSION_MODES,
@@ -274,7 +274,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 
 	private async run(client: GatewayClient, root: string, abort: AbortController): Promise<void> {
 		const services = this.services;
-		const model = services.model;
+		const planModel = services.mode === 'plan' ? services.config.get<string>('planModel') : undefined;
+		const model = planModel || services.model;
+		if (planModel && planModel !== services.model) {
+			this.post({ type: 'event', event: { type: 'notice', message: `Plan mode is using ${planModel}.` } });
+		}
 		const info = await services.modelInfo(model);
 		const effort = services.config.get<string>('reasoningEffort', '');
 		try {

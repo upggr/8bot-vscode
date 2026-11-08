@@ -17,6 +17,7 @@ description: Every setting for 8bot for VS Code, including gateway URL, model, p
 | `eightbot.customInstructions` | empty | Added to every conversation |
 | `eightbot.monthlySpendLimit` | `0` | Your own monthly limit in USD |
 | `eightbot.pax8ClientId` | empty | Client account for live limits |
+| `eightbot.planModel` | empty | Optional model used while in plan mode, for example a cheaper one |
 | `eightbot.taskHint` | empty | Sent as `X-Pax8-Task` for routing rules |
 | `eightbot.agentId` | `8bot-vscode` | Sent as `X-Pax8-Agent-ID` |
 | `eightbot.pax8McpServer` | `false` | Offer the Pax8 MCP server to VS Code Chat |

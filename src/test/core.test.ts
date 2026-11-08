@@ -194,11 +194,30 @@ test('maps models and hides inactive ones', async () => {
 		{ id: 'a', display_name: 'A', lifecycleStatus: 'ACTIVE', capabilities: ['CHAT_COMPLETION'], contextWindow: 10, maxOutputTokens: 5, features: { tools: true, vision: true, reasoningEfforts: ['low'] } },
 		{ id: 'b', lifecycleStatus: 'RETIRED', capabilities: ['CHAT_COMPLETION'] },
 		{ id: 'c', lifecycleStatus: 'ACTIVE', capabilities: ['EMBEDDING'] },
+		{ id: 'd', lifecycleStatus: 'ACTIVE', capabilities: ['CHAT_COMPLETION'], deprecationInfo: { deprecatedAt: '2026-10-29T14:15:14Z', sunsetAt: null, replacedBy: null } },
 	] }));
 	const models = await client().listModels();
-	assert.deepEqual(models.map(m => m.id), ['a']);
+	assert.deepEqual(models.map(m => m.id), ['a', 'd']);
 	assert.equal(models[0].supportsImages, true);
 	assert.deepEqual(models[0].reasoningEfforts, ['low']);
+	assert.equal(models[1].deprecatedAt, '2026-10-29T14:15:14Z');
+});
+
+test('rich usage details are read from the stream', async () => {
+	handler = (_req, res) => sse(res, [
+		{ choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }] },
+		{ choices: [{ delta: {} }], usage: { prompt_tokens: 18, completion_tokens: 4, cost: 4.18e-6, prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 12 }, completion_tokens_details: { reasoning_tokens: 3 } } },
+	], { 'x-pax8-guard-result': 'allowed' });
+	const events = await collect(client().streamChat({ model: 'm', messages: [] }));
+	const usage = events.find(e => e.type === 'usage');
+	assert.equal(usage?.type, 'usage');
+	if (usage?.type === 'usage') {
+		assert.equal(usage.usage.promptTokens, 18);
+		assert.equal(usage.usage.completionTokens, 4);
+		assert.equal(usage.usage.cost, 4.18e-6);
+		assert.equal(usage.usage.cacheWriteTokens, 12);
+		assert.equal(usage.usage.reasoningTokens, 3);
+	}
 });
 
 test('reads a live limit using the Pax8 token, not the key', async () => {

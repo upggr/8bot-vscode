@@ -210,7 +210,13 @@ export class Services implements vscode.Disposable {
 		if (!await this.client('sidebar')) { return; }
 		const models = await this.models(true);
 		const picked = await vscode.window.showQuickPick(
-			models.map(m => ({ label: m.name, description: m.id, detail: m.description, picked: m.id === this.model, id: m.id })),
+			models.map(m => ({
+				label: m.deprecatedAt ? `$(warning) ${m.name}` : m.name,
+				description: m.deprecatedAt ? `${m.id} · deprecated` : m.id,
+				detail: m.description,
+				picked: m.id === this.model,
+				id: m.id,
+			})),
 			{ title: 'Select Model', matchOnDescription: true },
 		);
 		if (picked) { await this.setModel(picked.id); }

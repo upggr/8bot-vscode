@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Show richer per-request usage on the context meter: reasoning tokens, tokens written to the prompt cache, and exact request cost.
+- Flag deprecated models in the model picker, from the gateway's deprecation info.
+- New `eightbot.planModel` setting: use a different (for example cheaper) model automatically while in plan mode.
+
 ## 0.1.5
 
 - Attach files, images and screenshots to the sidebar chat by dragging, pasting or picking them.
