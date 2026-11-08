@@ -136,7 +136,8 @@
 		status.hidden = !state.busy;
 		if (!state.busy) { return; }
 		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
-		status.textContent = awaitingApproval ? 'Waiting for your approval' : seconds < 3 ? 'Working...' : 'Thinking... ' + seconds + 's';
+		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
+		status.textContent = (awaitingApproval ? 'Waiting for your approval' : seconds < 3 ? 'Working...' : 'Thinking... ' + seconds + 's') + queued;
 	}
 
 	function updateStatusTimer() {
@@ -344,8 +345,20 @@
 		fill($('sessions'), sessions.map(s => ({ value: s.id, label: s.title })), next.sessionId);
 
 		updateStatusTimer();
-		$('send').hidden = next.busy;
+		$('send').hidden = false;
 		$('stop').hidden = !next.busy;
+		const queueBar = $('queue');
+		queueBar.replaceChildren();
+		queueBar.hidden = !next.queue || next.queue.length === 0;
+		(next.queue || []).forEach(item => {
+			const chip = element('span', 'chip', '⏳ ' + item.text.slice(0, 60));
+			const remove = element('button', 'link', '×');
+			remove.type = 'button';
+			remove.title = 'Remove from queue';
+			remove.addEventListener('click', () => post('removeQueued', { id: String(item.index) }));
+			chip.appendChild(remove);
+			queueBar.appendChild(chip);
+		});
 		const credits = $('credits');
 		credits.textContent = next.credits.label;
 		credits.title = next.credits.detail;
@@ -387,7 +400,7 @@
 
 	function send() {
 		const text = input.value.trim();
-		if ((!text && pendingAttachments.length === 0) || state.busy) { return; }
+		if (!text && pendingAttachments.length === 0) { return; }
 		input.value = '';
 		const attachments = pendingAttachments;
 		pendingAttachments = [];
@@ -402,7 +415,7 @@
 		}
 	});
 	$('send').addEventListener('click', send);
-	$('stop').addEventListener('click', () => post('stop'));
+	$('stop').addEventListener('click', () => post('stop', { value: 'all' }));
 	$('newChat').addEventListener('click', () => post('newChat'));
 	$('saveConnection').addEventListener('click', saveConnection);
 	$('apiKey').addEventListener('keydown', event => { if (event.key === 'Enter') { saveConnection(); } });

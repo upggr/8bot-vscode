@@ -29,6 +29,7 @@ button.link.low { color: var(--vscode-editorWarning-foreground); }
 button.link.empty { color: var(--vscode-errorForeground); }
 body.dragging::after { content: 'Drop to attach'; position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; font-size: 1.1em; background: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent); border: 2px dashed var(--vscode-focusBorder); pointer-events: none; }
 #attachments { padding: 0; }
+#queue { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 10px; font-size: 0.85em; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
 .chip button { padding: 0 3px; background: none; color: var(--vscode-descriptionForeground); font-size: 1em; }
 .message { line-height: 1.5; overflow-wrap: anywhere; }

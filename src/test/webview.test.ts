@@ -12,7 +12,7 @@ const BODY = `
 <main id="app" hidden>
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
-<div id="status" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
+<div id="status" hidden></div><div id="queue" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
 <button id="attach"></button><select id="model"></select><select id="effort" hidden></select><select id="mode"></select>
 <button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
 </main>`;
@@ -128,6 +128,23 @@ test('a busy chat shows live progress and approval waits', () => {
 	assert.match($('status').textContent ?? '', /Working/);
 	send({ ...STATE, busy: false });
 	assert.equal($('status').hidden, true);
+	dom.window.close();
+});
+
+test('messages typed while busy are queued and can be removed', () => {
+	const { posted, send, $, win, dom } = load();
+	send({ ...STATE, busy: true });
+	$('input').value = 'second request';
+	$('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	assert.deepEqual(posted.at(-1), { type: 'send', text: 'second request', includeSelection: false, attachments: [] });
+	send({ ...STATE, busy: true, queue: [{ index: 0, text: 'second request' }] });
+	assert.equal($('queue').hidden, false);
+	assert.match($('queue').textContent ?? '', /second request/);
+	assert.match($('status').textContent ?? '', /1 queued/);
+	(win.document.querySelector('#queue button') as HTMLButtonElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'removeQueued', id: '0' });
+	send({ ...STATE, busy: false, queue: [] });
+	assert.equal($('queue').hidden, true);
 	dom.window.close();
 });
 

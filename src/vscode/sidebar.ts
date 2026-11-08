@@ -49,6 +49,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	private readonly store: SessionStore;
 	private abort: AbortController | undefined;
 	private remembered = new Set<string>();
+	/** Messages typed while a request is running, sent in order once it finishes. */
+	private readonly queue: { text: string; includeSelection: boolean; attachments: Attachment[] }[] = [];
 	private readonly pending = new Map<string, { resolve: (answer: PermissionAnswer) => void; request: PermissionRequest }>();
 	private readonly diffContent = new Map<string, string>();
 	private readonly subscriptions: vscode.Disposable[] = [];
@@ -91,6 +93,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 
 	async startNew(): Promise<void> {
 		this.stop();
+		this.queue.length = 0;
 		this.session = newSession();
 		this.remembered = new Set();
 		this.lastPromptTokens = 0;
@@ -128,10 +131,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			case 'send': {
 				const text = message.text?.trim() ?? '';
 				const attachments = (message.attachments ?? []).slice(0, MAX_ATTACHMENTS);
-				if (text || attachments.length) { await this.send(text, message.includeSelection === true, attachments); }
+				if (!text && attachments.length === 0) { break; }
+				if (this.abort && !text.startsWith('/')) {
+					this.queue.push({ text, includeSelection: message.includeSelection === true, attachments });
+					await this.postState();
+					break;
+				}
+				await this.send(text, message.includeSelection === true, attachments);
 				break;
 			}
+			case 'removeQueued':
+				this.queue.splice(Number(message.id), 1);
+				await this.postState();
+				break;
 			case 'stop':
+				if (message.value === 'all') { this.queue.length = 0; }
 				this.stop();
 				break;
 			case 'newChat':
@@ -236,6 +250,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			sessions: await this.store.list(),
 			sessionId: this.session.id,
 			busy: this.abort !== undefined,
+			queue: this.queue.map((q, i) => ({ index: i, text: q.text || q.attachments[0]?.name || 'Attachment' })),
 			credits: this.services.credits,
 			promptTokens: this.lastPromptTokens,
 			selection: selection ? { file: selection.file, lines: selection.lines } : undefined,
@@ -312,6 +327,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			await this.store.save(this.session).catch(() => undefined);
 			this.post({ type: 'event', event: { type: 'done' } });
 			await this.postState();
+		}
+		const next = this.queue.shift();
+		if (next) {
+			await this.postState();
+			await this.send(next.text, next.includeSelection, next.attachments);
 		}
 	}
 
@@ -461,6 +481,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	<footer>
 		<label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked> <span id="selectionText"></span></label>
 		<div id="status" class="muted" role="status" hidden></div>
+		<div id="queue" hidden></div>
 		<div id="attachments" class="row" hidden></div>
 		<textarea id="input" rows="3" placeholder="Ask 8bot to build, fix or explain. Drop or paste a file or screenshot, or type / for commands." aria-label="Message"></textarea>
 		<input id="fileInput" type="file" multiple hidden>

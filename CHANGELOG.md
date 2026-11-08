@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Message queue: type while 8bot is working and your message waits in a visible queue and runs next, instead of being lost. Queued messages can be removed, and Stop clears the queue.
+
 ## 0.1.5
 
 - Attach files, images and screenshots to the sidebar chat by dragging, pasting or picking them.
