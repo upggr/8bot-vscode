@@ -27,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('eightbot.connectPax8', () => services.connectPax8()),
 		vscode.commands.registerCommand('eightbot.showCredits', () => services.showCredits()),
 		vscode.commands.registerCommand('eightbot.openMemory', () => services.openMemory()),
+		vscode.commands.registerCommand('eightbot.exportChat', () => chatView.exportChat()),
 	);
 }
 

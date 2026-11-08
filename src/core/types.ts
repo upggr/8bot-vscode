@@ -46,6 +46,9 @@ export interface ModelInfo {
 	reasoningEfforts: string[];
 	/** Set when the provider has deprecated this model, from `deprecationInfo.deprecatedAt`. */
 	deprecatedAt?: string;
+	/** Raw modality lists, so non-chat models (audio, image) are visible the day the gateway adds them. */
+	inputModalities: string[];
+	outputModalities: string[];
 }
 
 export type StreamEvent =

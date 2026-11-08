@@ -399,7 +399,8 @@ function toModelInfo(raw: unknown): ModelInfo | undefined {
 	const m = raw as {
 		id?: string; display_name?: string; displayName?: string; modelFamily?: string; description?: string;
 		contextWindow?: number; max_input_tokens?: number; maxOutputTokens?: number; lifecycleStatus?: string;
-		capabilities?: string[]; inputModalities?: string[]; features?: { tools?: boolean; vision?: boolean; reasoningEfforts?: string[] };
+		capabilities?: string[]; inputModalities?: string[]; outputModalities?: string[];
+		features?: { tools?: boolean; vision?: boolean; reasoningEfforts?: string[] };
 		deprecationInfo?: { deprecatedAt?: string | null; sunsetAt?: string | null; replacedBy?: string | null } | null;
 	};
 	if (!m.id) { return undefined; }
@@ -416,5 +417,7 @@ function toModelInfo(raw: unknown): ModelInfo | undefined {
 		supportsImages: (m.features?.vision ?? false) || (m.inputModalities?.includes('IMAGE') ?? false),
 		reasoningEfforts: m.features?.reasoningEfforts ?? [],
 		deprecatedAt: m.deprecationInfo?.deprecatedAt ?? undefined,
+		inputModalities: m.inputModalities ?? ['TEXT'],
+		outputModalities: m.outputModalities ?? ['TEXT'],
 	};
 }

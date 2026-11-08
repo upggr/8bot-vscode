@@ -46,6 +46,7 @@ Drag a file or image onto the sidebar chat, paste a screenshot from the clipboar
 | `/model <id>` | Switch model |
 | `/mode <mode>` | Switch permission mode |
 | `/credits` | Show spend and credits |
+| `/cost` | Break down this chat's cost per model |
 | `/remember <note>` | Save a fact for future chats |
 | `/forget <text>` | Remove saved notes |
 | `/memory` | Open saved memory |

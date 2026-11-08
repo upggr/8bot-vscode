@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.9
+
+- Export the chat as Markdown from the view menu or **8bot: Export Chat as Markdown**, with tool calls and results included.
+- Every error now has a Retry button that re-sends the last message.
+- Attached images show as inline thumbnails in the chat instead of only a file chip.
+- New `/cost` command: per-model spend for the current chat, with cached and reasoning token shares.
+- Dictate messages with the 🎤 button where speech recognition is available.
+- The model parser keeps raw input/output modality lists, so audio or image models surface automatically if the gateway ever adds them.
+
 ## 0.1.8
 
 - Live progress with numbers: the status line now shows streamed output as it arrives (~tokens out), the Thinking panel shows its own running token count, and once a request has reported its real cost, a rough live $ estimate appears while the model works.

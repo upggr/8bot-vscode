@@ -24,6 +24,8 @@ button:hover { background: var(--vscode-button-hoverBackground); }
 button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
 button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
 button.icon { padding: 0 8px; font-size: 1.2em; }
+button.recording { color: var(--vscode-errorForeground); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.5; } }
 button.link { padding: 0; background: none; color: var(--vscode-textLink-foreground); }
 button.link.low { color: var(--vscode-editorWarning-foreground); }
 button.link.empty { color: var(--vscode-errorForeground); }
@@ -32,6 +34,7 @@ body.dragging::after { content: 'Drop to attach'; position: fixed; inset: 0; z-i
 #queue { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 10px; font-size: 0.85em; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
 .chip button { padding: 0 3px; background: none; color: var(--vscode-descriptionForeground); font-size: 1em; }
+img.thumb { display: block; max-width: 220px; max-height: 160px; margin-top: 6px; border-radius: 4px; border: 1px solid var(--vscode-panel-border); }
 .message { line-height: 1.5; overflow-wrap: anywhere; }
 .message.user { padding: 6px 10px; white-space: pre-wrap; border-radius: 4px; background: var(--vscode-input-background); }
 .message.notice { color: var(--vscode-descriptionForeground); font-style: italic; }

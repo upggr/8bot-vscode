@@ -160,11 +160,19 @@ test('messages typed while busy are queued and can be removed', () => {
 	dom.window.close();
 });
 
-test('limit errors offer the subscription page', () => {
+test('limit errors offer the subscription page and every error offers a retry', () => {
 	const { posted, send, win } = load();
 	send(STATE);
 	send({ type: 'event', event: { type: 'error', message: 'limit', showBuy: true } });
-	(win.document.querySelector('.error button') as HTMLButtonElement).click();
+	const buttons = [...win.document.querySelectorAll('.error button')] as HTMLButtonElement[];
+	assert.equal(buttons.length, 2);
+	assert.equal(buttons[0].textContent, 'Retry');
+	assert.match(buttons[1].textContent ?? '', /subscription/);
+	buttons[0].click();
+	assert.equal(posted.at(-1)?.type, 'retry');
+	assert.equal(win.document.querySelector('.error'), null);
+	send({ type: 'event', event: { type: 'error', message: 'limit', showBuy: true } });
+	([...win.document.querySelectorAll('.error button')] as HTMLButtonElement[])[1].click();
 	assert.equal(posted.at(-1)?.type, 'buy');
 });
 

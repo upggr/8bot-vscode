@@ -5,6 +5,7 @@ import { Attachment, ATTACHMENTS_OPEN, buildAttachedContent, canReadImages, MAX_
 import { SUMMARY_PREFIX, estimateTokens, outputTokenLimit } from '../core/context';
 import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
+import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError } from '../core/gateway';
 import { addMemory, readMemory, removeMemory } from '../core/memory';
 import { isPermissionMode, PERMISSION_MODES } from '../core/permissions';
@@ -24,6 +25,7 @@ const HELP = [
 	'- `/model <id>` switch model',
 	'- `/mode <default|acceptEdits|plan|bypassPermissions>` switch permission mode',
 	'- `/credits` show spend and credits',
+	'- `/cost` break down what this chat has cost, per model',
 	'- `/remember <note>` save a fact for future chats',
 	'- `/forget <text>` remove saved notes containing the text',
 	'- `/memory` open saved memory',
@@ -51,10 +53,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	private remembered = new Set<string>();
 	/** Messages typed while a request is running, sent in order once it finishes. */
 	private readonly queue: { text: string; includeSelection: boolean; attachments: Attachment[] }[] = [];
+	/** What the user last sent, so a failed request can be retried with one click. */
+	private lastSent: { text: string; includeSelection: boolean; attachments: Attachment[] } | undefined;
 	private readonly pending = new Map<string, { resolve: (answer: PermissionAnswer) => void; request: PermissionRequest }>();
 	private readonly diffContent = new Map<string, string>();
 	private readonly subscriptions: vscode.Disposable[] = [];
 	private lastPromptTokens = 0;
+	/** Per-model usage accumulated for this chat, used by /cost. */
+	private spend = new Map<string, { requests: number; cost: number; promptTokens: number; completionTokens: number; cachedTokens: number; reasoningTokens: number }>();
 	private restored = false;
 
 	constructor(private readonly context: vscode.ExtensionContext, private readonly services: Services) {
@@ -96,6 +102,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		this.queue.length = 0;
 		this.session = newSession();
 		this.remembered = new Set();
+		this.spend = new Map();
+		this.lastSent = undefined;
 		this.lastPromptTokens = 0;
 		await this.postTranscript();
 		await this.postState();
@@ -109,6 +117,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	async askAboutSelection(): Promise<void> {
 		await this.reveal();
 		this.post({ type: 'focusInput', text: 'Explain the selected code.' });
+	}
+
+	/** Re-sends the last message after a failure. The failed turn left the user message at the tail. */
+	private async retryLast(): Promise<void> {
+		if (this.abort || !this.lastSent) { return; }
+		const last = this.session.messages.at(-1);
+		if (last?.role === 'user') { this.session.messages.pop(); }
+		await this.send(this.lastSent.text, this.lastSent.includeSelection, this.lastSent.attachments);
+	}
+
+	async exportChat(): Promise<void> {
+		const messages = [...(this.session.archive ?? []), ...this.session.messages];
+		if (messages.length === 0) {
+			void vscode.window.showInformationMessage('This chat is empty, there is nothing to export.');
+			return;
+		}
+		const markdown = sessionToMarkdown(this.session.title, this.session.updatedAt, messages);
+		const document = await vscode.workspace.openTextDocument({ content: markdown, language: 'markdown' });
+		await vscode.window.showTextDocument(document, { preview: true });
 	}
 
 	private stop(): void {
@@ -177,6 +204,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				break;
 			case 'credits':
 				await this.services.showCredits();
+				break;
+			case 'exportChat':
+				await this.exportChat();
+				break;
+			case 'retry':
+				await this.retryLast();
 				break;
 			default:
 				break;
@@ -274,13 +307,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		}
 
 		const selection = includeSelection ? this.editorContext() : undefined;
+		this.lastSent = { text, includeSelection: includeSelection && !!selection, attachments };
 		const withSelection = selection ? `${text}${CONTEXT_OPEN}\nSelected from ${selection.file}:${selection.lines}\n${selection.text}\n</editor_context>` : text;
 		const modelId = this.services.model;
 		const info = await this.services.modelInfo(modelId);
 		const content = buildAttachedContent(withSelection, attachments, canReadImages(modelId, info?.supportsImages));
 		this.session.messages.push({ role: 'user', content });
 		if (this.session.title === 'New chat') { this.session.title = (text || attachments[0]?.name || 'Attachment').slice(0, 60); }
-		this.post({ type: 'event', event: { type: 'user', text, attachments: attachments.map(a => ({ name: a.name, mime: a.mime, isImage: !!a.dataUrl })) } });
+		this.post({ type: 'event', event: { type: 'user', text, attachments: attachments.map(a => ({ name: a.name, mime: a.mime, isImage: !!a.dataUrl, dataUrl: a.dataUrl })) } });
 
 		const abort = new AbortController();
 		this.abort = abort;
@@ -355,8 +389,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			this.archive(event.removed);
 			return;
 		}
-		if (event.type === 'usage') { this.lastPromptTokens = event.usage.promptTokens; }
+		if (event.type === 'usage') {
+			this.lastPromptTokens = event.usage.promptTokens;
+			const key = event.usage.model ?? 'unknown';
+			const entry = this.spend.get(key) ?? { requests: 0, cost: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, reasoningTokens: 0 };
+			entry.requests++;
+			entry.cost += event.usage.cost ?? 0;
+			entry.promptTokens += event.usage.promptTokens;
+			entry.completionTokens += event.usage.completionTokens;
+			entry.cachedTokens += event.usage.cachedTokens ?? 0;
+			entry.reasoningTokens += event.usage.reasoningTokens ?? 0;
+			this.spend.set(key, entry);
+		}
 		this.post({ type: 'event', event });
+	}
+
+	private costReport(): string {
+		if (this.spend.size === 0) { return 'No requests in this chat yet.'; }
+		const lines = ['**This chat so far**', ''];
+		let total = 0;
+		for (const [model, s] of [...this.spend.entries()].sort((a, b) => b[1].cost - a[1].cost)) {
+			total += s.cost;
+			const parts = [`${s.requests} request${s.requests === 1 ? '' : 's'}`, `${(s.promptTokens + s.completionTokens).toLocaleString()} tokens`];
+			if (s.cachedTokens) { parts.push(`${s.cachedTokens.toLocaleString()} cached`); }
+			if (s.reasoningTokens) { parts.push(`${s.reasoningTokens.toLocaleString()} reasoning`); }
+			lines.push(`- \`${model}\`: **$${s.cost.toFixed(6)}** (${parts.join(', ')})`);
+		}
+		lines.push('', `**Total: $${total.toFixed(6)}**`);
+		return lines.join('\n');
 	}
 
 	private requestPermission(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer> {
@@ -396,6 +456,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				return true;
 			case '/credits':
 				this.post({ type: 'event', event: { type: 'info', text: `**${this.services.credits.label}**\n\n${this.services.credits.detail}` } });
+				return true;
+			case '/cost':
+				this.post({ type: 'event', event: { type: 'info', text: this.costReport() } });
 				return true;
 			case '/remember':
 				if (!value) { return false; }
@@ -487,6 +550,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		<input id="fileInput" type="file" multiple hidden>
 		<div class="row">
 			<button id="attach" class="icon secondary" type="button" title="Attach files" aria-label="Attach files">📎</button>
+			<button id="dictate" class="icon secondary" type="button" title="Dictate a message" aria-label="Dictate a message" hidden>🎤</button>
 			<select id="model" aria-label="Model" title="Model"></select>
 			<select id="effort" aria-label="Reasoning effort" title="Reasoning effort" hidden></select>
 			<select id="mode" aria-label="Permission mode" title="Permission mode"></select>
@@ -518,8 +582,10 @@ function visibleUserText(content: ChatMessage['content']): string {
 	return Number.isFinite(index) ? text.slice(0, index) : text;
 }
 
-function hasImageAttachment(content: ChatMessage['content']): boolean {
-	return Array.isArray(content) && content.some(p => p.type === 'image_url');
+function firstImageUrl(content: ChatMessage['content']): string | undefined {
+	if (!Array.isArray(content)) { return undefined; }
+	const part = content.find(p => p.type === 'image_url');
+	return part?.type === 'image_url' ? part.image_url.url : undefined;
 }
 
 /** Turns stored messages into items the webview can draw. */
@@ -530,7 +596,7 @@ export function transcriptItems(messages: ChatMessage[]): object[] {
 		if (message.role === 'user' && typeof message.content === 'string' && message.content.startsWith(SUMMARY_PREFIX)) {
 			items.push({ kind: 'notice', text: 'Older messages above were summarized to save context.' });
 		} else if (message.role === 'user') {
-			items.push({ kind: 'user', text: visibleUserText(message.content), hasImage: hasImageAttachment(message.content) });
+			items.push({ kind: 'user', text: visibleUserText(message.content), imageUrl: firstImageUrl(message.content) });
 		} else if (message.role === 'assistant') {
 			if (typeof message.content === 'string' && message.content) { items.push({ kind: 'assistant', text: message.content }); }
 			for (const call of message.tool_calls ?? []) {

@@ -9,6 +9,7 @@ import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } fro
 import { buildAttachedContent, canReadImages, truncateAttachmentText } from '../core/attachments';
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
+import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
 import { addMemory, readMemory } from '../core/memory';
 import { decide, PermissionMode, rememberKey } from '../core/permissions';
@@ -529,6 +530,30 @@ test('truncateAttachmentText caps long text and flags it', () => {
 	assert.deepEqual(truncateAttachmentText('short'), { text: 'short', truncated: false });
 	const long = truncateAttachmentText('x'.repeat(10), 4);
 	assert.deepEqual(long, { text: 'xxxx', truncated: true });
+});
+
+test('a session exports as Markdown with tool calls, hiding editor context and attachments', () => {
+	const messages: ChatMessage[] = [
+		{ role: 'user', content: 'fix the bug\n\n<editor_context>\nSelected from a.ts:1\nx\n</editor_context>' },
+		{ role: 'assistant', content: 'Done.', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'edit_file', arguments: '{"path":"a.ts"}' } }] },
+		{ role: 'tool', tool_call_id: 'c1', content: 'Edited a.ts.' },
+	];
+	const md = sessionToMarkdown('Fix bug', 1730000000000, messages);
+	assert.match(md, /^# Fix bug/);
+	assert.match(md, /## User\n\nfix the bug\n/);
+	assert.ok(!md.includes('editor_context'));
+	assert.match(md, /## 8bot\n\nDone\./);
+	assert.match(md, /`edit_file`/);
+	assert.match(md, /Edited a\.ts\./);
+});
+
+test('modality lists pass through from the catalog', async () => {
+	handler = (_req, res) => res.end(JSON.stringify({ data: [
+		{ id: 'tts-x', display_name: 'TTS X', lifecycleStatus: 'ACTIVE', capabilities: ['CHAT_COMPLETION'], inputModalities: ['TEXT'], outputModalities: ['AUDIO'] },
+	] }));
+	const models = await client().listModels();
+	assert.deepEqual(models[0].outputModalities, ['AUDIO']);
+	assert.deepEqual(models[0].inputModalities, ['TEXT']);
 });
 
 test('summaries shorten tool output', () => {

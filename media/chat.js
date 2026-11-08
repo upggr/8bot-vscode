@@ -126,6 +126,10 @@
 
 	function showError(message, showBuy) {
 		const box = add(element('div', 'message error', message));
+		const retry = element('button', 'secondary', 'Retry');
+		retry.type = 'button';
+		retry.addEventListener('click', () => { box.remove(); post('retry'); });
+		box.appendChild(retry);
 		if (showBuy) {
 			const button = element('button', 'secondary', 'Get a subscription from BUY IT');
 			button.type = 'button';
@@ -171,7 +175,15 @@
 				liveChars = 0;
 				const box = add(element('div', 'message user', event.text));
 				(event.attachments || []).forEach(a => {
-					box.appendChild(element('span', 'chip', (a.isImage ? '🖼 ' : '📄 ') + a.name));
+					if (a.isImage && a.dataUrl) {
+						const img = element('img', 'thumb');
+						img.src = a.dataUrl;
+						img.alt = a.name;
+						img.title = a.name;
+						box.appendChild(img);
+					} else {
+						box.appendChild(element('span', 'chip', (a.isImage ? '🖼 ' : '📄 ') + a.name));
+					}
 				});
 				break;
 			}
@@ -393,7 +405,12 @@
 		items.forEach(item => {
 			if (item.kind === 'user') {
 				const box = add(element('div', 'message user', item.text));
-				if (item.hasImage) { box.appendChild(element('span', 'chip', '🖼 image')); }
+				if (item.imageUrl) {
+					const img = element('img', 'thumb');
+					img.src = item.imageUrl;
+					img.alt = 'Attached image';
+					box.appendChild(img);
+				}
 			} else if (item.kind === 'notice') {
 				add(element('div', 'message notice', item.text));
 			} else if (item.kind === 'assistant') {
@@ -446,6 +463,36 @@
 	$('sessions').addEventListener('change', e => post('loadSession', { value: e.target.value }));
 	$('attach').addEventListener('click', () => $('fileInput').click());
 	$('fileInput').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+	setupDictation();
+
+	function setupDictation() {
+		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+		if (!SpeechRecognition) { return; }
+		const button = $('dictate');
+		button.hidden = false;
+		let recognition;
+		let listening = false;
+		let baseText = '';
+		button.addEventListener('click', () => {
+			if (listening) { recognition.stop(); return; }
+			recognition = new SpeechRecognition();
+			recognition.continuous = true;
+			recognition.interimResults = true;
+			baseText = input.value ? input.value.replace(/\s?$/, ' ') : '';
+			recognition.onresult = event => {
+				let text = '';
+				for (let i = 0; i < event.results.length; i++) { text += event.results[i][0].transcript; }
+				input.value = baseText + text;
+			};
+			recognition.onend = () => { listening = false; button.classList.remove('recording'); input.focus(); };
+			recognition.onerror = () => { listening = false; button.classList.remove('recording'); };
+			try {
+				recognition.start();
+				listening = true;
+				button.classList.add('recording');
+			} catch { /* already started */ }
+		});
+	}
 	input.addEventListener('paste', event => {
 		const files = Array.from(event.clipboardData && event.clipboardData.files || []);
 		if (files.length) { event.preventDefault(); addFiles(files); }
