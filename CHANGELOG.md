@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.11
+
+- Pick or add an API key right in the chat: a key button under the model picker shows which key is active, switches between saved keys, adds a new one and forgets old ones. Keys saved before 0.1.10 now appear there too, and the chat view only ever receives masked keys.
+- Cleaner controls: reasoning effort and permission mode are now one-click toggles, and the remaining dropdowns have a tidier rounded style.
+
 ## 0.1.10
 
 - Switch between saved API keys: **8bot: Switch API Key** lists every saved key with a friendly name, masked key and gateway, and switches or forgets them. The setup screen can name a key when you add it. Keys stay in VS Code secret storage.

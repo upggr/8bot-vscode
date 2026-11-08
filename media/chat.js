@@ -59,6 +59,92 @@
 		select.value = value;
 	}
 
+	/** One-click choices. Drawn only from state, so a declined change (like Bypass) never looks applied. */
+	function fillToggle(group, options, value) {
+		const focused = group.contains(document.activeElement) ? document.activeElement.dataset.value : undefined;
+		group.replaceChildren(...options.map(o => {
+			const button = element('button', '', o.label);
+			button.type = 'button';
+			button.dataset.value = o.value;
+			button.title = o.title || o.label;
+			button.setAttribute('aria-pressed', String(o.value === value));
+			return button;
+		}));
+		const restore = Array.from(group.children).find(b => b.dataset.value === focused);
+		if (restore) { restore.focus(); }
+	}
+
+	function onToggle(group, type) {
+		group.addEventListener('click', event => {
+			const button = event.target.closest('button');
+			if (button && button.getAttribute('aria-pressed') !== 'true') { post(type, { value: button.dataset.value }); }
+		});
+	}
+
+	function drawKeys(keys) {
+		const active = keys.find(k => k.active);
+		const name = !active ? 'Key from environment' : active.label === active.masked ? active.masked : active.label + ' · ' + active.masked;
+		$('keyName').textContent = name;
+		$('keyButton').title = active ? 'API key: ' + name + ' on ' + active.gateway : 'API key';
+		$('keyList').replaceChildren(...keys.map(key => {
+			const row = element('div', key.active ? 'key-item active' : 'key-item');
+			const pick = element('button', 'key-pick');
+			pick.type = 'button';
+			pick.setAttribute('aria-pressed', String(key.active));
+			pick.appendChild(element('span', '', (key.active ? '✓ ' : '') + key.label));
+			const host = key.gateway.replace(/^https?:\/\//, '');
+			pick.appendChild(element('small', '', key.label === key.masked ? host : key.masked + ' · ' + host));
+			pick.addEventListener('click', () => {
+				if (!key.active) { post('switchKey', { value: key.id }); }
+				closeKeyMenu();
+			});
+			row.appendChild(pick);
+			if (!key.active) {
+				const forget = element('button', 'key-forget', '×');
+				forget.type = 'button';
+				forget.title = 'Forget this key';
+				forget.setAttribute('aria-label', 'Forget ' + key.label);
+				forget.addEventListener('click', () => {
+					if (forget.classList.contains('armed')) { post('forgetKey', { value: key.id }); return; }
+					forget.classList.add('armed');
+					forget.textContent = 'Forget?';
+				});
+				row.appendChild(forget);
+			}
+			return row;
+		}));
+	}
+
+	function showKeyForm(open) {
+		$('keyForm').hidden = !open;
+		$('addKey').hidden = open;
+		$('keyError').hidden = true;
+		$('newKey').value = '';
+		$('newKeyName').value = '';
+		if (open) {
+			$('newKeyGateway').value = state.gateway || '';
+			$('newKey').focus();
+		}
+	}
+
+	function openKeyMenu(withForm) {
+		$('keyMenu').hidden = false;
+		$('keyButton').setAttribute('aria-expanded', 'true');
+		showKeyForm(withForm);
+	}
+
+	function closeKeyMenu() {
+		$('keyMenu').hidden = true;
+		$('keyButton').setAttribute('aria-expanded', 'false');
+		showKeyForm(false);
+	}
+
+	function saveKey() {
+		$('keyError').hidden = true;
+		$('saveKey').disabled = true;
+		post('addKey', { gateway: $('newKeyGateway').value.trim(), key: $('newKey').value.trim(), label: $('newKeyName').value.trim() });
+	}
+
 	function endAssistant() {
 		if (assistantEl) { assistantEl.innerHTML = render(assistantText); }
 		assistantEl = undefined;
@@ -362,13 +448,14 @@
 
 		const models = next.models.length ? next.models : [{ id: next.model, name: next.model, efforts: [] }];
 		fill($('model'), models.map(m => ({ value: m.id, label: m.deprecated ? '⚠ ' + m.name : m.name })), next.model);
-		fill($('mode'), next.modes.map(m => ({ value: m.id, label: m.label, title: m.detail })), next.mode);
+		fillToggle($('mode'), next.modes.map(m => ({ value: m.id, label: m.short || m.label, title: m.label + ': ' + m.detail })), next.mode);
 		$('mode').classList.toggle('danger', next.mode === 'bypassPermissions');
+		drawKeys(next.keys || []);
 
 		const current = models.find(m => m.id === next.model);
 		const efforts = current ? current.efforts : [];
 		$('effort').hidden = efforts.length === 0;
-		fill($('effort'), [{ value: '', label: 'Default effort' }].concat(efforts.map(e => ({ value: e, label: e }))), efforts.includes(next.effort) ? next.effort : '');
+		fillToggle($('effort'), [{ value: '', label: 'Default', title: 'Default reasoning effort' }].concat(efforts.map(e => ({ value: e, label: e, title: 'Reasoning effort: ' + e }))), efforts.includes(next.effort) ? next.effort : '');
 
 		const sessions = next.sessions.slice();
 		if (!sessions.some(s => s.id === next.sessionId)) { sessions.unshift({ id: next.sessionId, title: 'New chat' }); }
@@ -458,8 +545,15 @@
 	$('getSubscription').addEventListener('click', () => post('buy'));
 	$('credits').addEventListener('click', () => post('credits'));
 	$('model').addEventListener('change', e => post('setModel', { value: e.target.value }));
-	$('effort').addEventListener('change', e => post('setEffort', { value: e.target.value }));
-	$('mode').addEventListener('change', e => post('setMode', { value: e.target.value }));
+	onToggle($('effort'), 'setEffort');
+	onToggle($('mode'), 'setMode');
+	$('keyButton').addEventListener('click', () => { if ($('keyMenu').hidden) { openKeyMenu(false); } else { closeKeyMenu(); } });
+	$('addKey').addEventListener('click', () => showKeyForm(true));
+	$('cancelKey').addEventListener('click', () => showKeyForm(false));
+	$('saveKey').addEventListener('click', saveKey);
+	['newKey', 'newKeyName', 'newKeyGateway'].forEach(id => $(id).addEventListener('keydown', event => { if (event.key === 'Enter') { saveKey(); } }));
+	$('keyPicker').addEventListener('keydown', event => { if (event.key === 'Escape') { closeKeyMenu(); $('keyButton').focus(); } });
+	document.addEventListener('click', event => { if (!$('keyMenu').hidden && !$('keyPicker').contains(event.target)) { closeKeyMenu(); } });
 	$('sessions').addEventListener('change', e => post('loadSession', { value: e.target.value }));
 	$('attach').addEventListener('click', () => $('fileInput').click());
 	$('fileInput').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
@@ -525,6 +619,12 @@
 			$('setupError').textContent = message.error || '';
 			$('setupError').hidden = !message.error;
 			if (!message.error) { $('apiKey').value = ''; setupOpen = false; showSetup(!state.hasKey); }
+		}
+		else if (message.type === 'keyResult') {
+			$('saveKey').disabled = false;
+			$('keyError').textContent = message.error || '';
+			$('keyError').hidden = !message.error;
+			if (!message.error) { closeKeyMenu(); }
 		}
 		else if (message.type === 'focusInput') { input.value = message.text || ''; input.focus(); }
 	});

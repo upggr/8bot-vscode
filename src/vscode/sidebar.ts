@@ -200,6 +200,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			case 'saveConnection':
 				this.post({ type: 'setupResult', error: await this.services.saveConnection(message.gateway ?? '', message.key ?? '', message.label) });
 				break;
+			case 'addKey':
+				this.post({ type: 'keyResult', error: await this.services.saveConnection(message.gateway ?? '', message.key ?? '', message.label) });
+				break;
+			case 'switchKey':
+				await this.services.switchKey(message.value ?? '');
+				break;
+			case 'forgetKey':
+				await this.services.forgetKey(message.value ?? '');
+				break;
 			case 'buy':
 				await this.services.openSubscriptionPage();
 				break;
@@ -281,6 +290,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			mode: this.services.mode,
 			modes: PERMISSION_MODES,
 			effort: this.services.config.get<string>('reasoningEffort', ''),
+			keys: await this.services.savedKeys().catch(() => []),
 			sessions: await this.store.list(),
 			sessionId: this.session.id,
 			busy: this.abort !== undefined,
@@ -555,11 +565,31 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			<button id="attach" class="icon secondary" type="button" title="Attach files" aria-label="Attach files">📎</button>
 			<button id="dictate" class="icon secondary" type="button" title="Dictate a message" aria-label="Dictate a message" hidden>🎤</button>
 			<select id="model" aria-label="Model" title="Model"></select>
-			<select id="effort" aria-label="Reasoning effort" title="Reasoning effort" hidden></select>
-			<select id="mode" aria-label="Permission mode" title="Permission mode"></select>
 			<button id="send" type="button">Send</button>
 			<button id="stop" class="secondary" type="button" hidden>Stop</button>
 		</div>
+		<div id="keyPicker">
+			<button id="keyButton" type="button" title="API key" aria-label="API key" aria-haspopup="true" aria-expanded="false">
+				<svg class="key-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.5 1a4.5 4.5 0 0 0-4.36 5.63L1.15 11.6a.5.5 0 0 0-.15.36V14.5a.5.5 0 0 0 .5.5h2.75a.5.5 0 0 0 .5-.5V13h1.5a.5.5 0 0 0 .5-.5V11h1.5a.5.5 0 0 0 .35-.15l.77-.77A4.5 4.5 0 1 0 10.5 1Zm1 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
+				<span id="keyName"></span>
+			</button>
+			<div id="keyMenu" hidden>
+				<div id="keyList"></div>
+				<button id="addKey" class="link" type="button">+ Add a key</button>
+				<div id="keyForm" hidden>
+					<input id="newKey" type="password" spellcheck="false" autocomplete="off" placeholder="API key (sk-pax8-...)" aria-label="API key">
+					<input id="newKeyName" type="text" spellcheck="false" autocomplete="off" placeholder="Name (optional), e.g. Work" aria-label="Name for this key">
+					<input id="newKeyGateway" type="url" spellcheck="false" autocomplete="off" placeholder="Gateway URL" aria-label="Gateway URL">
+					<p id="keyError" class="error-text" role="alert" hidden></p>
+					<div class="row">
+						<button id="saveKey" type="button">Save and use</button>
+						<button id="cancelKey" class="secondary" type="button">Cancel</button>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div id="effort" class="segmented" role="group" aria-label="Reasoning effort" hidden></div>
+		<div id="mode" class="segmented" role="group" aria-label="Permission mode"></div>
 		<div class="row meta">
 			<button id="credits" class="link" type="button"></button>
 			<span id="contextUsage"></span>

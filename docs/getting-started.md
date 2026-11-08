@@ -25,7 +25,7 @@ Open the **8bot** tab in the Secondary Side Bar on the right, next to Chat. Pres
 
 **No gateway or key yet?** Select **Get a subscription from BUY IT**, or go to [buy-it.gr/8os](https://buy-it.gr/8os).
 
-To change them later, run **8bot: Enter Gateway and API Key** from the Command Palette. You can save several keys with friendly names and hop between them with **8bot: Switch API Key** — handy for separate work and personal accounts or gateways.
+To change them later, use the key button under the model picker in the chat, or run **8bot: Enter Gateway and API Key** from the Command Palette. You can save several keys with friendly names and hop between them from that button or with **8bot: Switch API Key** — handy for separate work and personal accounts or gateways.
 
 ## First request
 

@@ -4,11 +4,11 @@ export type ToolKind = 'read' | 'sensitiveRead' | 'edit' | 'sensitiveEdit' | 'ex
 
 export type Decision = 'allow' | 'ask' | 'deny';
 
-export const PERMISSION_MODES: { id: PermissionMode; label: string; detail: string }[] = [
-	{ id: 'default', label: 'Ask first', detail: 'Ask before edits and commands' },
-	{ id: 'acceptEdits', label: 'Accept edits', detail: 'Apply edits automatically, ask before commands' },
-	{ id: 'plan', label: 'Plan only', detail: 'Read only: edits and commands are blocked' },
-	{ id: 'bypassPermissions', label: 'Bypass permissions', detail: 'Run everything with no prompts' },
+export const PERMISSION_MODES: { id: PermissionMode; label: string; short: string; detail: string }[] = [
+	{ id: 'default', label: 'Ask first', short: 'Ask', detail: 'Ask before edits and commands' },
+	{ id: 'acceptEdits', label: 'Accept edits', short: 'Edits', detail: 'Apply edits automatically, ask before commands' },
+	{ id: 'plan', label: 'Plan only', short: 'Plan', detail: 'Read only: edits and commands are blocked' },
+	{ id: 'bypassPermissions', label: 'Bypass permissions', short: 'Bypass', detail: 'Run everything with no prompts' },
 ];
 
 const POLICY: Record<PermissionMode, Record<ToolKind, Decision>> = {

@@ -7,6 +7,19 @@ export interface StoredKey {
 	key: string;
 }
 
+/** What the chat view may know about a saved key. Never carries the key itself. */
+export interface KeyState {
+	id: string;
+	label: string;
+	masked: string;
+	gateway: string;
+	active: boolean;
+}
+
+export function keyStates(ring: StoredKey[], active: string | undefined): KeyState[] {
+	return ring.map(k => ({ id: k.id, label: k.label, masked: maskKey(k.key), gateway: k.gateway, active: k.key === active }));
+}
+
 export function maskKey(key: string): string {
 	return key.length <= 8 ? '••••' : `${key.slice(0, 8)}…${key.slice(-4)}`;
 }

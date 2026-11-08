@@ -17,7 +17,7 @@ import { buildSystemPrompt } from '../core/prompt';
 import { newSession, SessionStore } from '../core/sessions';
 import { findTool, globToRegExp, isSensitivePath, ToolContext } from '../core/tools';
 import { ChatMessage, ChatStreamer, ContentPart, StreamEvent, ToolCall } from '../core/types';
-import { defaultKeyLabel, maskKey } from '../core/keyring';
+import { defaultKeyLabel, keyStates, maskKey } from '../core/keyring';
 
 const KEY = 'sk-pax8-testkey';
 
@@ -537,6 +537,14 @@ test('key masking shows just enough to tell keys apart', () => {
 	assert.equal(maskKey('sk-pax8-1b8260744efa9a734dae8c78aada785d'), 'sk-pax8-…785d');
 	assert.equal(maskKey('short'), '••••');
 	assert.equal(defaultKeyLabel('sk-pax8-209d7b92e43c4a8ea77964fd0e6d3d28'), 'sk-pax8-…3d28');
+});
+
+test('key states for the chat view never carry the key itself', () => {
+	const key = 'sk-pax8-0000000000000000000000000000abcd';
+	const states = keyStates([{ id: '1', label: 'Work', gateway: 'https://api.8os.com', key }], key);
+	assert.deepEqual(states, [{ id: '1', label: 'Work', masked: 'sk-pax8-…abcd', gateway: 'https://api.8os.com', active: true }]);
+	assert.ok(!JSON.stringify(states).includes(key));
+	assert.equal(keyStates([{ id: '1', label: 'W', gateway: 'g', key }], 'other')[0].active, false);
 });
 
 test('a session exports as Markdown with tool calls, hiding editor context and attachments', () => {

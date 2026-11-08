@@ -13,7 +13,9 @@ const BODY = `
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
 <div id="status" hidden></div><div id="queue" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
-<button id="attach"></button><select id="model"></select><select id="effort" hidden></select><select id="mode"></select>
+<button id="attach"></button><select id="model"></select>
+<div id="keyPicker"><button id="keyButton" aria-expanded="false"><span id="keyName"></span></button><div id="keyMenu" hidden><div id="keyList"></div><button id="addKey"></button><div id="keyForm" hidden><input id="newKey"><input id="newKeyName"><input id="newKeyGateway"><p id="keyError" hidden></p><button id="saveKey"></button><button id="cancelKey"></button></div></div></div>
+<div id="effort" hidden></div><div id="mode"></div>
 <button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
 </main>`;
 
@@ -22,6 +24,10 @@ const STATE = {
 	models: [{ id: 'a', name: 'A', efforts: ['low', 'high'], contextWindow: 100 }, { id: 'b', name: 'B', efforts: [], contextWindow: 100 }],
 	model: 'a', mode: 'default', effort: 'high',
 	modes: [{ id: 'default', label: 'Ask first', detail: '' }, { id: 'bypassPermissions', label: 'Bypass', detail: '' }],
+	keys: [
+		{ id: 'k1', label: 'Work', masked: 'sk-pax8-…aaaa', gateway: 'https://api.8os.com', active: true },
+		{ id: 'k2', label: 'sk-pax8-…bbbb', masked: 'sk-pax8-…bbbb', gateway: 'https://other.example', active: false },
+	],
 	sessions: [], sessionId: 's1', busy: false, credits: { label: '$1.00 left', detail: 'd', level: 'low', live: false }, promptTokens: 50,
 };
 
@@ -80,7 +86,8 @@ test('state fills pickers, per-model effort, credits and context use', () => {
 	assert.equal($('app').hidden, false);
 	assert.equal($('model').value, 'a');
 	assert.equal($('effort').hidden, false);
-	assert.equal($('effort').value, 'high');
+	assert.equal($('effort').querySelector('[aria-pressed="true"]')?.textContent, 'high');
+	assert.equal($('mode').querySelector('[aria-pressed="true"]')?.textContent, 'Ask first');
 	assert.equal($('credits').textContent, '$1.00 left');
 	assert.ok($('credits').className.includes('low'));
 	assert.equal($('contextUsage').textContent, '50% context');
@@ -99,6 +106,63 @@ test('sending, model changes and Enter post the right messages', () => {
 	$('model').value = 'b';
 	$('model').dispatchEvent(new dom.window.Event('change'));
 	assert.deepEqual(posted.at(-1), { type: 'setModel', value: 'b' });
+});
+
+test('effort and mode toggles post new choices and wait for state before changing', () => {
+	const { posted, send, $ } = load();
+	send(STATE);
+	const before = posted.length;
+	($('effort').querySelector('[data-value="high"]') as HTMLElement).click();
+	assert.equal(posted.length, before, 'clicking the current choice does nothing');
+	($('effort').querySelector('[data-value="low"]') as HTMLElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'setEffort', value: 'low' });
+	($('mode').querySelector('[data-value="bypassPermissions"]') as HTMLElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'setMode', value: 'bypassPermissions' });
+	assert.equal($('mode').querySelector('[aria-pressed="true"]')?.textContent, 'Ask first');
+});
+
+test('the key picker shows the active key and switches, forgets and adds keys', () => {
+	const { dom, posted, send, $, win } = load();
+	send(STATE);
+	assert.equal($('keyName').textContent, 'Work · sk-pax8-…aaaa');
+	assert.equal($('keyMenu').hidden, true);
+	$('keyButton').click();
+	assert.equal($('keyMenu').hidden, false);
+	assert.equal($('keyButton').getAttribute('aria-expanded'), 'true');
+	assert.equal($('keyList').querySelectorAll('.key-item').length, 2);
+	assert.equal($('keyList').querySelectorAll('.key-forget').length, 1, 'the active key cannot be forgotten');
+
+	const forget = $('keyList').querySelector('.key-forget') as HTMLElement;
+	const before = posted.length;
+	forget.click();
+	assert.equal(posted.length, before, 'first click only asks');
+	assert.equal(forget.textContent, 'Forget?');
+	forget.click();
+	assert.deepEqual(posted.at(-1), { type: 'forgetKey', value: 'k2' });
+
+	($('keyList').querySelectorAll('.key-pick')[1] as HTMLElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'switchKey', value: 'k2' });
+	assert.equal($('keyMenu').hidden, true);
+
+	$('keyButton').click();
+	$('addKey').click();
+	assert.equal($('keyForm').hidden, false);
+	assert.equal($('newKeyGateway').value, 'https://api.8os.com');
+	$('newKey').value = ' sk-pax8-new ';
+	$('newKeyName').value = 'Home';
+	$('saveKey').click();
+	assert.deepEqual(posted.at(-1), { type: 'addKey', gateway: 'https://api.8os.com', key: 'sk-pax8-new', label: 'Home' });
+	send({ type: 'keyResult', error: 'rejected' });
+	assert.equal($('keyError').textContent, 'rejected');
+	assert.equal($('keyMenu').hidden, false);
+	assert.equal($('newKey').value, ' sk-pax8-new ', 'a failed save keeps what was typed');
+	send({ type: 'keyResult' });
+	assert.equal($('keyMenu').hidden, true);
+	assert.equal($('newKey').value, '', 'a saved key does not linger in the page');
+
+	$('keyButton').click();
+	win.document.body.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+	assert.equal($('keyMenu').hidden, true, 'clicking elsewhere closes it');
 });
 
 test('permission card answers once and tool output is plain text', () => {

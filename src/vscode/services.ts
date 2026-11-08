@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { addSpend, BUY_URL, creditStatus, CreditStatus, SpendRecord } from '../core/credits';
 import { DEFAULT_BASE_URL, GatewayClient, GatewayError, LiveLimit, normalizeBaseUrl } from '../core/gateway';
-import { defaultKeyLabel, maskKey, StoredKey } from '../core/keyring';
+import { defaultKeyLabel, KeyState, keyStates, maskKey, StoredKey } from '../core/keyring';
 import { addMemory, readMemory } from '../core/memory';
 import { isPermissionMode, PERMISSION_MODES, PermissionMode } from '../core/permissions';
 import { ModelInfo } from '../core/types';
@@ -44,6 +44,7 @@ export class Services implements vscode.Disposable {
 			this.status,
 			context.secrets.onDidChange(e => {
 				if (e.key === API_KEY_SECRET) { void this.keyChanged(); }
+				if (e.key === KEYRING_SECRET) { this.fire(); }
 				if (e.key === PAX8_TOKEN_SECRET) { void this.refreshLiveCredits(); }
 			}),
 			vscode.workspace.onDidChangeConfiguration(e => {
@@ -206,15 +207,36 @@ export class Services implements vscode.Disposable {
 			{ title: `${chosen.label} (${maskKey(chosen.key)})` },
 		);
 		if (actions?.action === 'switch') {
-			if (chosen.gateway !== normalizeBaseUrl(this.baseUrl)) {
-				await this.config.update('baseUrl', chosen.gateway, vscode.ConfigurationTarget.Global);
-			}
-			await this.context.secrets.store(API_KEY_SECRET, chosen.key);
+			await this.switchKey(chosen.id);
 			void vscode.window.showInformationMessage(`8bot now uses ${chosen.label} (${maskKey(chosen.key)}).`);
 		} else if (actions?.action === 'forget') {
-			await this.storeKeyring(ring.filter(k => k.key !== chosen.key));
+			await this.forgetKey(chosen.id);
 			void vscode.window.showInformationMessage(`Forgot ${chosen.label}. ${chosen.key === active ? 'The active key was left untouched.' : ''}`);
 		}
+	}
+
+	/** Saved keys for the chat view, masked. A key saved before the ring existed is added to it here. */
+	async savedKeys(): Promise<KeyState[]> {
+		const active = await this.context.secrets.get(API_KEY_SECRET);
+		let ring = await this.keyring();
+		if (active && !ring.some(k => k.key === active)) {
+			ring = [...ring, { id: randomUUID(), label: defaultKeyLabel(active), gateway: normalizeBaseUrl(this.baseUrl), key: active }];
+			await this.storeKeyring(ring);
+		}
+		return keyStates(ring, active);
+	}
+
+	async switchKey(id: string): Promise<void> {
+		const chosen = (await this.keyring()).find(k => k.id === id);
+		if (!chosen) { return; }
+		if (chosen.gateway !== this.baseUrl) {
+			await this.config.update('baseUrl', chosen.gateway, vscode.ConfigurationTarget.Global);
+		}
+		await this.context.secrets.store(API_KEY_SECRET, chosen.key);
+	}
+
+	async forgetKey(id: string): Promise<void> {
+		await this.storeKeyring((await this.keyring()).filter(k => k.id !== id));
 	}
 
 	async connectPax8(): Promise<void> {

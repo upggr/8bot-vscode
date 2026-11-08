@@ -16,14 +16,43 @@ footer { padding: 8px; border-top: 1px solid var(--vscode-panel-border); display
 .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .meta { justify-content: space-between; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
 textarea { resize: vertical; box-sizing: border-box; width: 100%; padding: 6px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); font: inherit; }
-textarea:focus, select:focus, button:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-select { max-width: 100%; min-width: 0; padding: 3px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, transparent); }
-select.danger { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
+textarea:focus, select:focus, button:focus, input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+select { -webkit-appearance: none; appearance: none; box-sizing: border-box; height: 26px; max-width: 100%; min-width: 0; padding: 0 24px 0 10px; border-radius: 6px; cursor: pointer; font: inherit; text-overflow: ellipsis; color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); background-color: var(--vscode-dropdown-background); background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: right 13px center, right 9px center; background-size: 4px 4px; background-repeat: no-repeat; }
+select:hover { border-color: var(--vscode-focusBorder); }
+#model { flex: 1 1 120px; }
+#send, #stop { height: 26px; border-radius: 6px; }
+.segmented { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 7px; background: var(--vscode-input-background); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); }
+.segmented button { flex: 1 1 auto; padding: 2px 6px; border-radius: 5px; white-space: nowrap; text-transform: capitalize; font-size: 0.9em; color: var(--vscode-descriptionForeground); background: none; }
+.segmented button:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.segmented button[aria-pressed="true"] { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.segmented.danger button[aria-pressed="true"] { color: var(--vscode-editor-background); background: var(--vscode-errorForeground); }
+#keyPicker { position: relative; }
+#keyButton { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 100%; height: 26px; padding: 0 24px 0 10px; border-radius: 6px; color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); background-color: var(--vscode-dropdown-background); background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: right 13px center, right 9px center; background-size: 4px 4px; background-repeat: no-repeat; }
+#keyButton:hover { border-color: var(--vscode-focusBorder); }
+#keyName { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+.key-icon { flex: none; width: 14px; height: 14px; color: var(--vscode-charts-yellow, currentColor); }
+#keyMenu { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 5; box-sizing: border-box; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: 8px; color: var(--vscode-menu-foreground, var(--vscode-foreground)); background: var(--vscode-menu-background, var(--vscode-dropdown-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border)); box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+#keyList { display: flex; flex-direction: column; gap: 2px; }
+.key-item { display: flex; align-items: center; border-radius: 5px; }
+.key-item:hover { background: var(--vscode-list-hoverBackground); }
+.key-item.active { background: var(--vscode-list-inactiveSelectionBackground); }
+.key-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 8px; color: inherit; background: none; text-align: left; }
+.key-pick:hover { background: none; }
+.key-pick span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.key-pick small { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--vscode-descriptionForeground); }
+.key-forget { flex: none; padding: 0 8px; color: var(--vscode-descriptionForeground); background: none; }
+.key-forget:hover { color: var(--vscode-errorForeground); background: none; }
+.key-forget.armed { color: var(--vscode-errorForeground); }
+#addKey { align-self: flex-start; padding: 2px 8px; }
+#addKey:hover { background: none; }
+#keyForm { display: flex; flex-direction: column; gap: 6px; padding: 0 2px 2px; }
+#keyForm p { margin: 0; }
+#keyForm input { box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); font: inherit; }
 button { padding: 4px 10px; border: none; cursor: pointer; color: var(--vscode-button-foreground); background: var(--vscode-button-background); font: inherit; }
 button:hover { background: var(--vscode-button-hoverBackground); }
 button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
 button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
-button.icon { padding: 0 8px; font-size: 1.2em; }
+button.icon { height: 26px; padding: 0 8px; border-radius: 6px; font-size: 1.2em; }
 button.recording { color: var(--vscode-errorForeground); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.5; } }
 button.link { padding: 0; background: none; color: var(--vscode-textLink-foreground); }
