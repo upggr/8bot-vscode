@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { Attachment, ATTACHMENTS_OPEN, buildAttachedContent, MAX_ATTACHMENTS } from '../core/attachments';
 import { SUMMARY_PREFIX, estimateTokens, outputTokenLimit } from '../core/context';
 import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
@@ -10,7 +11,7 @@ import { isPermissionMode, PERMISSION_MODES } from '../core/permissions';
 import { buildSystemPrompt, loadProjectInstructions } from '../core/prompt';
 import { newSession, Session, SessionStore } from '../core/sessions';
 import { findTool } from '../core/tools';
-import { ChatMessage } from '../core/types';
+import { ChatMessage, ContentPart } from '../core/types';
 import { Services } from './services';
 
 const DIFF_SCHEME = 'eightbot-diff';
@@ -37,6 +38,7 @@ interface WebviewMessage {
 	answer?: PermissionAnswer;
 	gateway?: string;
 	key?: string;
+	attachments?: Attachment[];
 }
 
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
@@ -123,9 +125,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				await this.postState();
 				await this.postTranscript();
 				break;
-			case 'send':
-				if (message.text?.trim()) { await this.send(message.text.trim(), message.includeSelection === true); }
+			case 'send': {
+				const text = message.text?.trim() ?? '';
+				const attachments = (message.attachments ?? []).slice(0, MAX_ATTACHMENTS);
+				if (text || attachments.length) { await this.send(text, message.includeSelection === true, attachments); }
 				break;
+			}
 			case 'stop':
 				this.stop();
 				break;
@@ -241,7 +246,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		this.post({ type: 'transcript', items: transcriptItems([...(this.session.archive ?? []), ...this.session.messages]) });
 	}
 
-	private async send(text: string, includeSelection: boolean): Promise<void> {
+	private async send(text: string, includeSelection: boolean, attachments: Attachment[] = []): Promise<void> {
 		if (this.abort) { return; }
 		if (text.startsWith('/') && await this.slashCommand(text)) { return; }
 
@@ -254,10 +259,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		}
 
 		const selection = includeSelection ? this.editorContext() : undefined;
-		const content = selection ? `${text}${CONTEXT_OPEN}\nSelected from ${selection.file}:${selection.lines}\n${selection.text}\n</editor_context>` : text;
+		const withSelection = selection ? `${text}${CONTEXT_OPEN}\nSelected from ${selection.file}:${selection.lines}\n${selection.text}\n</editor_context>` : text;
+		const supportsImages = (await this.services.modelInfo(this.services.model))?.supportsImages ?? false;
+		const content = buildAttachedContent(withSelection, attachments, supportsImages);
 		this.session.messages.push({ role: 'user', content });
-		if (this.session.title === 'New chat') { this.session.title = text.slice(0, 60); }
-		this.post({ type: 'event', event: { type: 'user', text } });
+		if (this.session.title === 'New chat') { this.session.title = (text || attachments[0]?.name || 'Attachment').slice(0, 60); }
+		this.post({ type: 'event', event: { type: 'user', text, attachments: attachments.map(a => ({ name: a.name, mime: a.mime, isImage: !!a.dataUrl })) } });
 
 		const abort = new AbortController();
 		this.abort = abort;
@@ -449,8 +456,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	<footer>
 		<label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked> <span id="selectionText"></span></label>
 		<div id="status" class="muted" role="status" hidden></div>
-		<textarea id="input" rows="3" placeholder="Ask 8bot to build, fix or explain. Type / for commands." aria-label="Message"></textarea>
+		<div id="attachments" class="row" hidden></div>
+		<textarea id="input" rows="3" placeholder="Ask 8bot to build, fix or explain. Drop or paste a file or screenshot, or type / for commands." aria-label="Message"></textarea>
+		<input id="fileInput" type="file" multiple hidden>
 		<div class="row">
+			<button id="attach" class="icon secondary" type="button" title="Attach files" aria-label="Attach files">📎</button>
 			<select id="model" aria-label="Model" title="Model"></select>
 			<select id="effort" aria-label="Reasoning effort" title="Reasoning effort" hidden></select>
 			<select id="mode" aria-label="Permission mode" title="Permission mode"></select>
@@ -470,10 +480,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	}
 }
 
+function rawUserText(content: ChatMessage['content']): string {
+	if (typeof content === 'string') { return content; }
+	if (content === null) { return ''; }
+	return content.filter((p): p is ContentPart & { type: 'text' } => p.type === 'text').map(p => p.text).join('');
+}
+
 function visibleUserText(content: ChatMessage['content']): string {
-	const text = typeof content === 'string' ? content : '';
-	const index = text.indexOf(CONTEXT_OPEN);
-	return index >= 0 ? text.slice(0, index) : text;
+	const text = rawUserText(content);
+	const index = Math.min(...[CONTEXT_OPEN, ATTACHMENTS_OPEN].map(marker => { const i = text.indexOf(marker); return i < 0 ? Infinity : i; }));
+	return Number.isFinite(index) ? text.slice(0, index) : text;
+}
+
+function hasImageAttachment(content: ChatMessage['content']): boolean {
+	return Array.isArray(content) && content.some(p => p.type === 'image_url');
 }
 
 /** Turns stored messages into items the webview can draw. */
@@ -484,7 +504,7 @@ export function transcriptItems(messages: ChatMessage[]): object[] {
 		if (message.role === 'user' && typeof message.content === 'string' && message.content.startsWith(SUMMARY_PREFIX)) {
 			items.push({ kind: 'notice', text: 'Older messages above were summarized to save context.' });
 		} else if (message.role === 'user') {
-			items.push({ kind: 'user', text: visibleUserText(message.content) });
+			items.push({ kind: 'user', text: visibleUserText(message.content), hasImage: hasImageAttachment(message.content) });
 		} else if (message.role === 'assistant') {
 			if (typeof message.content === 'string' && message.content) { items.push({ kind: 'assistant', text: message.content }); }
 			for (const call of message.tool_calls ?? []) {

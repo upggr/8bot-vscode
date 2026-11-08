@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Attach files, images and screenshots to the sidebar chat by dragging, pasting or picking them.
+- Fix empty replies repeating forever on the `auto` model: a reply cut off with no text now gets real output room on retry instead of only on models with an explicit limit.
+
 ## 0.1.4
 
 - Give models enough output room, which fixes empty replies on long chats.

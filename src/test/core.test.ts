@@ -6,7 +6,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } from '../core/agent';
-import { compactLimit, compactionCut, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
+import { buildAttachedContent, truncateAttachmentText } from '../core/attachments';
+import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
 import { addMemory, readMemory } from '../core/memory';
@@ -14,7 +15,7 @@ import { decide, PermissionMode, rememberKey } from '../core/permissions';
 import { buildSystemPrompt } from '../core/prompt';
 import { newSession, SessionStore } from '../core/sessions';
 import { findTool, globToRegExp, isSensitivePath, ToolContext } from '../core/tools';
-import { ChatMessage, ChatStreamer, StreamEvent, ToolCall } from '../core/types';
+import { ChatMessage, ChatStreamer, ContentPart, StreamEvent, ToolCall } from '../core/types';
 
 const KEY = 'sk-pax8-testkey';
 
@@ -477,6 +478,31 @@ test('compaction keeps recent work, returns what it removed and sends no tool me
 	assert.deepEqual(await compact({ client: stream, model: 'm', messages: [{ role: 'user', content: 'x' }] }), []);
 });
 
+test('attachments are inlined as data, and an image is dropped with a note when the model cannot see it', () => {
+	const files = [
+		{ name: 'notes.txt', mime: 'text/plain', text: 'hello', truncated: false },
+		{ name: 'shot.png', mime: 'image/png', dataUrl: 'data:image/png;base64,abc' },
+	];
+	const withVision = buildAttachedContent('look at this', files, true);
+	assert.ok(Array.isArray(withVision));
+	const textPart = (withVision as ContentPart[])[0];
+	assert.equal(textPart.type, 'text');
+	assert.match((textPart as { text: string }).text, /look at this/);
+	assert.match((textPart as { text: string }).text, /Attached file notes\.txt:\nhello/);
+	assert.match((textPart as { text: string }).text, /Attached image: shot\.png/);
+	assert.deepEqual((withVision as ContentPart[])[1], { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } });
+
+	const withoutVision = buildAttachedContent('look at this', files, false);
+	assert.equal(typeof withoutVision, 'string');
+	assert.match(withoutVision as string, /was not sent because the current model cannot read images/);
+});
+
+test('truncateAttachmentText caps long text and flags it', () => {
+	assert.deepEqual(truncateAttachmentText('short'), { text: 'short', truncated: false });
+	const long = truncateAttachmentText('x'.repeat(10), 4);
+	assert.deepEqual(long, { text: 'xxxx', truncated: true });
+});
+
 test('summaries shorten tool output', () => {
 	const text = flattenForSummary(toolTurn('1', 'run_command', { command: 'x' }, 'q'.repeat(9_000)));
 	assert.ok(text.length < 3_000);
@@ -623,6 +649,24 @@ test('a reply cut off with no output retries with more room, up to the model lim
 		};
 		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', []), maxTokens: 1000, modelMaxOutput: 3000 });
 		assert.deepEqual(sizes, [1000, 2000, 3000]);
+	} finally { clean(); }
+});
+
+test('a truncated empty reply with no output limit set (auto model) still grows on retry', async () => {
+	const { root, clean } = workspace();
+	try {
+		const sizes: (number | undefined)[] = [];
+		let calls = 0;
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				sizes.push(request.maxTokens);
+				calls++;
+				if (calls < 2) { yield { type: 'finish', reason: 'length' }; return; }
+				yield say('answer');
+			},
+		};
+		await runAgent(agentOptions(stream, root, 'default', 'allow', []));
+		assert.deepEqual(sizes, [undefined, DEFAULT_OUTPUT_TOKENS]);
 	} finally { clean(); }
 });
 

@@ -12,8 +12,8 @@ const BODY = `
 <main id="app" hidden>
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
-<div id="status" hidden></div><textarea id="input"></textarea>
-<select id="model"></select><select id="effort" hidden></select><select id="mode"></select>
+<div id="status" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
+<button id="attach"></button><select id="model"></select><select id="effort" hidden></select><select id="mode"></select>
 <button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
 </main>`;
 
@@ -93,7 +93,7 @@ test('sending, model changes and Enter post the right messages', () => {
 	send(STATE);
 	$('input').value = 'hello';
 	$('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-	assert.deepEqual(posted.at(-1), { type: 'send', text: 'hello', includeSelection: false });
+	assert.deepEqual(posted.at(-1), { type: 'send', text: 'hello', includeSelection: false, attachments: [] });
 	assert.equal($('input').value, '');
 	$('model').value = 'b';
 	$('model').dispatchEvent(new dom.window.Event('change'));

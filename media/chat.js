@@ -17,6 +17,14 @@
 	let statusTimer;
 	const tools = new Map();
 
+	// Kept in sync with src/core/attachments.ts.
+	const MAX_ATTACHMENTS = 5;
+	const MAX_ATTACHMENT_TEXT = 50000;
+	const MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024;
+	const MAX_IMAGE_DIMENSION = 1600;
+	let pendingAttachments = [];
+	let screenshotCount = 0;
+
 	function post(type, extra) {
 		vscode.postMessage(Object.assign({ type: type }, extra));
 	}
@@ -149,10 +157,14 @@
 		if (event.type === 'toolEnd') { awaitingApproval = false; }
 		renderStatus();
 		switch (event.type) {
-			case 'user':
+			case 'user': {
 				endAssistant();
-				add(element('div', 'message user', event.text));
+				const box = add(element('div', 'message user', event.text));
+				(event.attachments || []).forEach(a => {
+					box.appendChild(element('span', 'chip', (a.isImage ? '🖼 ' : '📄 ') + a.name));
+				});
 				break;
+			}
 			case 'text':
 				appendAssistant(event.text);
 				break;
@@ -204,6 +216,97 @@
 		}
 	}
 
+	function isImage(file) {
+		return file.type.indexOf('image/') === 0;
+	}
+
+	function isLikelyText(file) {
+		if (isImage(file)) { return false; }
+		if (file.type && file.type.indexOf('text/') === 0) { return true; }
+		return /\.(txt|md|markdown|json|jsonc|ya?ml|csv|tsv|log|xml|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|java|kt|c|h|cpp|hpp|cs|php|sh|bash|zsh|sql|toml|ini|env|gitignore|dockerfile)$/i.test(file.name);
+	}
+
+	function downscaleImage(file) {
+		return new Promise(resolve => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				const img = new Image();
+				img.onload = () => {
+					const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(img.width, img.height));
+					const canvas = document.createElement('canvas');
+					canvas.width = Math.max(1, Math.round(img.width * scale));
+					canvas.height = Math.max(1, Math.round(img.height * scale));
+					const ctx = canvas.getContext('2d');
+					ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+					resolve(canvas.toDataURL('image/png'));
+				};
+				img.onerror = () => resolve(reader.result);
+				img.src = reader.result;
+			};
+			reader.onerror = () => resolve(undefined);
+			reader.readAsDataURL(file);
+		});
+	}
+
+	function readText(file) {
+		return new Promise(resolve => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				const text = String(reader.result || '');
+				resolve({ text: text.slice(0, MAX_ATTACHMENT_TEXT), truncated: text.length > MAX_ATTACHMENT_TEXT });
+			};
+			reader.onerror = () => resolve({ text: '[Could not read this file.]', truncated: false });
+			reader.readAsText(file);
+		});
+	}
+
+	async function addFiles(files) {
+		const list = Array.from(files || []);
+		for (const file of list) {
+			if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+				add(element('div', 'message notice', 'Only ' + MAX_ATTACHMENTS + ' attachments are kept at a time.'));
+				break;
+			}
+			if (isImage(file)) {
+				if (file.size > MAX_ATTACHMENT_IMAGE_BYTES) {
+					add(element('div', 'message notice', file.name + ' is too large to attach.'));
+					continue;
+				}
+				const dataUrl = await downscaleImage(file);
+				if (dataUrl) {
+					screenshotCount += 1;
+					pendingAttachments.push({ name: file.name || ('screenshot-' + screenshotCount + '.png'), mime: 'image/png', dataUrl: dataUrl });
+				}
+			} else if (isLikelyText(file)) {
+				const result = await readText(file);
+				pendingAttachments.push({ name: file.name, mime: file.type || 'text/plain', text: result.text, truncated: result.truncated });
+			} else {
+				add(element('div', 'message notice', file.name + ' is a type 8bot cannot read yet. Attach a text file or an image.'));
+			}
+		}
+		renderAttachments();
+	}
+
+	function removeAttachment(index) {
+		pendingAttachments.splice(index, 1);
+		renderAttachments();
+	}
+
+	function renderAttachments() {
+		const bar = $('attachments');
+		bar.replaceChildren();
+		bar.hidden = pendingAttachments.length === 0;
+		pendingAttachments.forEach((attachment, index) => {
+			const chip = element('span', 'chip', (attachment.dataUrl ? '🖼 ' : '📄 ') + attachment.name);
+			const remove = element('button', 'link', '×');
+			remove.type = 'button';
+			remove.title = 'Remove';
+			remove.addEventListener('click', () => removeAttachment(index));
+			chip.appendChild(remove);
+			bar.appendChild(chip);
+		});
+	}
+
 	function showContext(tokens, cached) {
 		const model = (state.models || []).find(m => m.id === state.model);
 		const meter = $('contextUsage');
@@ -251,7 +354,8 @@
 		transcript.replaceChildren();
 		items.forEach(item => {
 			if (item.kind === 'user') {
-				add(element('div', 'message user', item.text));
+				const box = add(element('div', 'message user', item.text));
+				if (item.hasImage) { box.appendChild(element('span', 'chip', '🖼 image')); }
 			} else if (item.kind === 'notice') {
 				add(element('div', 'message notice', item.text));
 			} else if (item.kind === 'assistant') {
@@ -276,9 +380,12 @@
 
 	function send() {
 		const text = input.value.trim();
-		if (!text || state.busy) { return; }
+		if ((!text && pendingAttachments.length === 0) || state.busy) { return; }
 		input.value = '';
-		post('send', { text: text, includeSelection: !$('selectionChip').hidden && $('includeSelection').checked });
+		const attachments = pendingAttachments;
+		pendingAttachments = [];
+		renderAttachments();
+		post('send', { text: text, includeSelection: !$('selectionChip').hidden && $('includeSelection').checked, attachments: attachments });
 	}
 
 	input.addEventListener('keydown', event => {
@@ -299,6 +406,22 @@
 	$('effort').addEventListener('change', e => post('setEffort', { value: e.target.value }));
 	$('mode').addEventListener('change', e => post('setMode', { value: e.target.value }));
 	$('sessions').addEventListener('change', e => post('loadSession', { value: e.target.value }));
+	$('attach').addEventListener('click', () => $('fileInput').click());
+	$('fileInput').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+	input.addEventListener('paste', event => {
+		const files = Array.from(event.clipboardData && event.clipboardData.files || []);
+		if (files.length) { event.preventDefault(); addFiles(files); }
+	});
+	['dragenter', 'dragover'].forEach(name => {
+		document.body.addEventListener(name, event => { event.preventDefault(); document.body.classList.add('dragging'); });
+	});
+	['dragleave', 'drop'].forEach(name => {
+		document.body.addEventListener(name, event => { event.preventDefault(); document.body.classList.remove('dragging'); });
+	});
+	document.body.addEventListener('drop', event => {
+		const files = event.dataTransfer && event.dataTransfer.files;
+		if (files && files.length) { addFiles(files); }
+	});
 	transcript.addEventListener('click', event => {
 		if (event.target.classList.contains('copy')) {
 			const code = event.target.parentElement.querySelector('code').textContent;

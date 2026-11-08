@@ -29,7 +29,7 @@ export function estimateTokens(messages: ChatMessage[]): number {
 	return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
-const DEFAULT_OUTPUT_TOKENS = 32_000;
+export const DEFAULT_OUTPUT_TOKENS = 32_000;
 
 /**
  * Output limit for a request. Without one the gateway applies 4,096 tokens,

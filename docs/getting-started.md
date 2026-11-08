@@ -31,6 +31,10 @@ To change them later, run **8bot: Enter Gateway and API Key** from the Command P
 
 Open a folder, type a request such as `Add tests for the date helpers` and press Enter. By default, 8bot asks before each edit or command.
 
+## Attach files, images and screenshots
+
+Drag a file or image onto the sidebar chat, paste a screenshot from the clipboard, or press the 📎 button to pick files. Text files are included as part of your message. Images are sent to the model only when the selected model can read images; otherwise 8bot tells you so instead of silently dropping it.
+
 ## Slash commands in the sidebar
 
 | Command | What it does |

@@ -1,4 +1,4 @@
-import { compactLimit, compactionCut, estimateTokens, flattenForSummary, KEEP_TOKENS_AFTER_COMPACT, keepTokensFor, looksLikeOverflow, SUMMARY_PREFIX, trimForRequest } from './context';
+import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, flattenForSummary, KEEP_TOKENS_AFTER_COMPACT, keepTokensFor, looksLikeOverflow, SUMMARY_PREFIX, trimForRequest } from './context';
 import { decide, PermissionMode, rememberKey, ToolKind } from './permissions';
 import { findTool, Tool, TOOLS, ToolContext } from './tools';
 import { ChatMessage, ChatStreamer, ToolCall, Usage } from './types';
@@ -169,7 +169,12 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 		if (!text && calls.length === 0) {
 			if (emptyReplies < MAX_EMPTY_RETRIES) {
 				emptyReplies++;
-				if (finish === 'length' && maxTokens) { maxTokens = Math.min(maxTokens * 2, options.modelMaxOutput ?? maxTokens * 2); }
+				if (finish === 'length') {
+					// An empty-but-truncated reply often means the gateway's small default output
+					// limit cut off a thinking model before it wrote any text, including on "auto".
+					const grown = maxTokens ? maxTokens * 2 : DEFAULT_OUTPUT_TOKENS;
+					maxTokens = options.modelMaxOutput ? Math.min(grown, options.modelMaxOutput) : grown;
+				}
 				if (emptyReplies === 1) { onEvent({ type: 'notice', message: 'The model returned nothing, trying again.' }); }
 				turn--;
 				continue;
