@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { Attachment, ATTACHMENTS_OPEN, buildAttachedContent, MAX_ATTACHMENTS } from '../core/attachments';
+import { Attachment, ATTACHMENTS_OPEN, buildAttachedContent, canReadImages, MAX_ATTACHMENTS } from '../core/attachments';
 import { SUMMARY_PREFIX, estimateTokens, outputTokenLimit } from '../core/context';
 import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
@@ -260,8 +260,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 
 		const selection = includeSelection ? this.editorContext() : undefined;
 		const withSelection = selection ? `${text}${CONTEXT_OPEN}\nSelected from ${selection.file}:${selection.lines}\n${selection.text}\n</editor_context>` : text;
-		const supportsImages = (await this.services.modelInfo(this.services.model))?.supportsImages ?? false;
-		const content = buildAttachedContent(withSelection, attachments, supportsImages);
+		const modelId = this.services.model;
+		const info = await this.services.modelInfo(modelId);
+		const content = buildAttachedContent(withSelection, attachments, canReadImages(modelId, info?.supportsImages));
 		this.session.messages.push({ role: 'user', content });
 		if (this.session.title === 'New chat') { this.session.title = (text || attachments[0]?.name || 'Attachment').slice(0, 60); }
 		this.post({ type: 'event', event: { type: 'user', text, attachments: attachments.map(a => ({ name: a.name, mime: a.mime, isImage: !!a.dataUrl })) } });

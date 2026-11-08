@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } from '../core/agent';
-import { buildAttachedContent, truncateAttachmentText } from '../core/attachments';
+import { buildAttachedContent, canReadImages, truncateAttachmentText } from '../core/attachments';
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
@@ -514,6 +514,15 @@ test('attachments are inlined as data, and an image is dropped with a note when 
 	const withoutVision = buildAttachedContent('look at this', files, false);
 	assert.equal(typeof withoutVision, 'string');
 	assert.match(withoutVision as string, /was not sent because the current model cannot read images/);
+});
+
+test('canReadImages trusts the catalog first, then auto routing and known vision families', () => {
+	assert.equal(canReadImages('claude-haiku-5-5', true), true);
+	assert.equal(canReadImages('claude-haiku-5-5', false), true);
+	assert.equal(canReadImages('auto', false), true);
+	assert.equal(canReadImages('auto', undefined), true);
+	assert.equal(canReadImages('mystery-model-9000', false), false);
+	assert.equal(canReadImages('mystery-model-9000', undefined), false);
 });
 
 test('truncateAttachmentText caps long text and flags it', () => {

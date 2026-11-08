@@ -24,6 +24,18 @@ export function truncateAttachmentText(text: string, max = MAX_ATTACHMENT_TEXT):
 }
 
 /**
+ * The gateway catalog under-reports vision: every model, including Claude and GPT
+ * families that can read images, says vision:false with TEXT-only input modalities.
+ * `auto` routing can also land on any of them, so it is treated as capable too.
+ * Worst case, a model without vision ignores the image part.
+ */
+const VISION_CAPABLE = /claude|gpt|gemini|qwen|kimi|glm|llama|nova|deepseek|minimax/i;
+
+export function canReadImages(modelId: string, supportsImages: boolean | undefined): boolean {
+	return supportsImages === true || modelId === 'auto' || VISION_CAPABLE.test(modelId);
+}
+
+/**
  * Builds the user message content for typed text plus dropped or pasted files.
  * Images are embedded only when the model can read images; otherwise the user is
  * told why one was left out instead of silently dropping it. Text-like files are
