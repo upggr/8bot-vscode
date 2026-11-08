@@ -427,7 +427,8 @@ export class Services implements vscode.Disposable {
 			const credits = this.credits;
 			this.status.text = `${bypass ? '$(warning)' : '$(sparkle)'} 8bot ${credits.label}`;
 			this.status.command = 'eightbot.showCredits';
-			this.status.backgroundColor = bypass || credits.level === 'empty'
+			// Red is only for a real credit problem; bypass mode just gets the warning icon.
+			this.status.backgroundColor = credits.level === 'empty'
 				? new vscode.ThemeColor('statusBarItem.errorBackground')
 				: credits.level === 'low' ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
 			this.status.tooltip = `${this.model} · ${this.currentMode}\n${credits.detail}`;

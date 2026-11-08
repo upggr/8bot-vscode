@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+- The status bar no longer turns red in bypass mode; a chosen permission mode is not an error. It keeps the warning icon, and red is reserved for an empty limit.
+
 ## 0.1.14
 
 - More accurate spend figures: the locally counted monthly spend is now tracked per API key, so switching keys no longer mixes spend from different accounts into one number. The live Pax8 limit is refreshed immediately when you switch keys, and it is shown in the currency the gateway reports (e.g. €) instead of always $.
