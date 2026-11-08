@@ -1,0 +1,10 @@
+title: 8bot for VS Code
+description: Unofficial AI coding agent and chat for Visual Studio Code using the Pax8 8os Agent Gateway.
+url: https://upggr.github.io
+baseurl: /8bot-vscode
+theme: jekyll-theme-cayman
+author: Ioannis Kokkinis
+lang: en
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap

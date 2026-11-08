@@ -1,0 +1,340 @@
+{
+  "name": "8bot-vscode",
+  "displayName": "8bot: AI Coding Agent for the 8os Gateway (Unofficial)",
+  "description": "Unofficial AI coding agent and chat for VS Code using your Pax8 8os Agent Gateway API key: sidebar chat, @8bot in VS Code Chat, model selection, file edits, terminal commands and permission modes.",
+  "version": "0.1.0",
+  "publisher": "upggr",
+  "author": {
+    "name": "Ioannis Kokkinis",
+    "url": "https://github.com/upggr"
+  },
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#101418",
+    "theme": "dark"
+  },
+  "homepage": "https://upggr.github.io/8bot-vscode/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/upggr/8bot-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/upggr/8bot-vscode/issues"
+  },
+  "engines": {
+    "vscode": "^1.145.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "8bot",
+    "8os",
+    "pax8",
+    "agent gateway",
+    "ai agent",
+    "coding agent",
+    "chat",
+    "llm",
+    "openai compatible",
+    "mcp"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "8bot can edit files and run commands, so it only runs in trusted workspaces."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "8bot needs a local file system and terminal."
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "eightbot",
+          "title": "8bot",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "eightbot": [
+        {
+          "type": "webview",
+          "id": "eightbot.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "eightbot.agent",
+        "name": "8bot",
+        "fullName": "8bot",
+        "description": "Coding agent powered by your 8os Agent Gateway",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "plan",
+            "description": "Read and plan only, make no changes"
+          },
+          {
+            "name": "edit",
+            "description": "Apply file edits automatically, ask before commands"
+          },
+          {
+            "name": "bypass",
+            "description": "Run this request with no permission prompts"
+          },
+          {
+            "name": "models",
+            "description": "List the models your gateway key can use"
+          }
+        ]
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "eightos",
+        "displayName": "8os Agent Gateway"
+      }
+    ],
+    "commands": [
+      {
+        "command": "eightbot.openChat",
+        "title": "Open Chat",
+        "category": "8bot",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "eightbot.newChat",
+        "title": "New Chat",
+        "category": "8bot",
+        "icon": "$(add)"
+      },
+      {
+        "command": "eightbot.setApiKey",
+        "title": "Enter Gateway and API Key",
+        "category": "8bot",
+        "icon": "$(key)"
+      },
+      {
+        "command": "eightbot.clearApiKey",
+        "title": "Remove API Key",
+        "category": "8bot"
+      },
+      {
+        "command": "eightbot.selectModel",
+        "title": "Select Model",
+        "category": "8bot"
+      },
+      {
+        "command": "eightbot.setPermissionMode",
+        "title": "Set Permission Mode",
+        "category": "8bot"
+      },
+      {
+        "command": "eightbot.askAboutSelection",
+        "title": "Ask About Selection",
+        "category": "8bot"
+      },
+      {
+        "command": "eightbot.getSubscription",
+        "title": "Get an 8os Subscription",
+        "category": "8bot",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "eightbot.connectPax8",
+        "title": "Connect Pax8 Account for Live Credits",
+        "category": "8bot"
+      },
+      {
+        "command": "eightbot.showCredits",
+        "title": "Show Credits",
+        "category": "8bot"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "eightbot.newChat",
+          "when": "view == eightbot.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eightbot.setApiKey",
+          "when": "view == eightbot.chatView",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "eightbot.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "8bot@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "eightbot.openChat",
+        "key": "ctrl+alt+8",
+        "mac": "cmd+alt+8"
+      }
+    ],
+    "configuration": {
+      "title": "8bot",
+      "properties": {
+        "eightbot.baseUrl": {
+          "type": "string",
+          "default": "https://api.8os.com",
+          "scope": "application",
+          "markdownDescription": "Gateway base URL. Your API key is sent here. User settings only, so a repository cannot redirect your key."
+        },
+        "eightbot.defaultModel": {
+          "type": "string",
+          "default": "auto",
+          "scope": "application",
+          "description": "Model used until you pick another one."
+        },
+        "eightbot.permissionMode": {
+          "type": "string",
+          "default": "default",
+          "scope": "application",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "plan",
+            "bypassPermissions"
+          ],
+          "enumDescriptions": [
+            "Ask before edits and commands.",
+            "Apply edits automatically, ask before commands.",
+            "Read only: edits and commands are blocked.",
+            "Run everything with no prompts. Use only in a sandbox or a project you can restore."
+          ],
+          "description": "Permission mode at startup. User settings only, so a repository cannot enable bypass."
+        },
+        "eightbot.maxTurns": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "scope": "application",
+          "description": "Maximum model turns for one request."
+        },
+        "eightbot.maxOutputTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "scope": "application",
+          "description": "Maximum output tokens per turn. 0 uses the model default."
+        },
+        "eightbot.reasoningEffort": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "scope": "application",
+          "description": "Reasoning effort, used only when the selected model supports it. Empty uses the model default."
+        },
+        "eightbot.commandTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 3600,
+          "scope": "application",
+          "description": "Default timeout for terminal commands."
+        },
+        "eightbot.customInstructions": {
+          "type": "string",
+          "default": "",
+          "editPresentation": "multilineText",
+          "scope": "application",
+          "description": "Extra instructions added to every conversation."
+        },
+        "eightbot.monthlySpendLimit": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "scope": "application",
+          "description": "Your own monthly limit in USD. 8bot shows spend on this computer against it. 0 turns it off. A live Pax8 limit takes priority when connected."
+        },
+        "eightbot.pax8ClientId": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Pax8 client account ID used to read live spend limits. Needs a connected Pax8 token."
+        },
+        "eightbot.taskHint": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Optional `X-Pax8-Task` value, used by gateway routing rules when the model is `auto`."
+        },
+        "eightbot.agentId": {
+          "type": "string",
+          "default": "8bot-vscode",
+          "scope": "application",
+          "markdownDescription": "Sent as `X-Pax8-Agent-ID` so your 8os dashboard can track and limit this agent separately. Leave empty to turn it off."
+        },
+        "eightbot.pax8McpServer": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Offer the Pax8 MCP server (`https://mcp.pax8.com/v1/mcp`) to VS Code Chat, for Pax8 companies, orders and invoices."
+        }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "eightbot.pax8Mcp",
+        "label": "Pax8"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "test:live": "npm run compile && node scripts/live-test.mjs",
+    "test:e2e": "npm run compile && node out/test/e2e/run.js",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.145.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "@vscode/test-electron": "^2.5.0",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.39.5",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.6.0"
+  },
+  "pricing": "Free",
+  "extensionKind": [
+    "workspace"
+  ]
+}
