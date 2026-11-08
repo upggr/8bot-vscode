@@ -19,7 +19,7 @@ You can also [download the `.vsix`](https://github.com/upggr/8bot-vscode/release
 
 ## Connect your gateway and key
 
-Open the **8bot** icon in the Activity Bar.
+Open the **8bot** tab in the Secondary Side Bar on the right, next to Chat. Press `Cmd+Alt+8` (`Ctrl+Alt+8` on Windows and Linux) to jump to it.
 
 **Did your provider already give you a gateway and API key?** Enter them on the setup screen and select **Connect**. The default gateway is `https://api.8os.com`, and 8os keys start with `sk-pax8-`. 8bot checks the connection before saving, and your key goes into VS Code secret storage.
 

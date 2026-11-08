@@ -36,7 +36,7 @@ It works in its own sidebar, as **`@8bot` in the VS Code Chat window**, and as a
 ## Quick start
 
 1. [Install 8bot from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=IoannisKokkinis.8bot-vscode), or search for **8bot** in the VS Code Extensions view.
-2. Open the **8bot** icon in the Activity Bar.
+2. Open the **8bot** tab in the Secondary Side Bar on the right, next to Chat. Press `Cmd+Alt+8` (`Ctrl+Alt+8` on Windows and Linux) to jump to it.
 3. **Did your provider already give you a gateway and API key?** Enter them on the setup screen. The default gateway is `https://api.8os.com`.
 4. **No gateway or key yet?** [Get an 8os subscription from BUY IT](https://buy-it.gr/8os).
 5. Open a folder and ask 8bot to do something.
@@ -47,7 +47,7 @@ Full guide: [Getting started](https://upggr.github.io/8bot-vscode/getting-starte
 
 | Where | How | Best for |
 |---|---|---|
-| 8bot sidebar | Click the 8bot icon, or press `Cmd+Alt+8` (`Ctrl+Alt+8` on Windows and Linux) | Full agent with history, approvals and credits |
+| 8bot tab | Click the 8bot tab in the right sidebar, or press `Cmd+Alt+8` (`Ctrl+Alt+8` on Windows and Linux) | Full agent with history, approvals and credits |
 | VS Code Chat | Type `@8bot` in the Chat window | Working alongside other VS Code chat agents |
 | Model picker | Add **8os Agent Gateway** in Manage Models | Using 8os models with VS Code's built-in agent |
 

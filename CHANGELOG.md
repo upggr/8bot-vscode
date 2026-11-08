@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Move 8bot to a tab in the right sidebar, next to Chat.
+
 ## 0.1.1
 
 - When automatic routing is rejected by the model provider, retry on an available DeepSeek model.
