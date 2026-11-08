@@ -104,18 +104,16 @@
 				closeKeyMenu();
 			});
 			row.appendChild(pick);
-			if (!key.active) {
-				const forget = element('button', 'key-forget', '×');
-				forget.type = 'button';
-				forget.title = 'Forget this key';
-				forget.setAttribute('aria-label', 'Forget ' + key.label);
-				forget.addEventListener('click', () => {
-					if (forget.classList.contains('armed')) { post('forgetKey', { value: key.id }); return; }
-					forget.classList.add('armed');
-					forget.textContent = 'Forget?';
-				});
-				row.appendChild(forget);
-			}
+			const forget = element('button', 'key-forget', '×');
+			forget.type = 'button';
+			forget.title = key.active ? 'Forget this key. 8bot moves to another saved key, or asks for a new one.' : 'Forget this key';
+			forget.setAttribute('aria-label', 'Forget ' + key.label);
+			forget.addEventListener('click', () => {
+				if (forget.classList.contains('armed')) { post('forgetKey', { value: key.id }); return; }
+				forget.classList.add('armed');
+				forget.textContent = 'Forget?';
+			});
+			row.appendChild(forget);
 			return row;
 		}));
 	}
@@ -449,7 +447,7 @@
 			if (!$('gateway').value) { $('gateway').value = next.gateway; }
 		}
 		showSetup(!next.hasKey || setupOpen);
-		if (!next.hasKey) { return; }
+		if (!next.hasKey) { closeKeyMenu(); return; }
 
 		const models = next.models.length ? next.models : [{ id: next.model, name: next.model, efforts: [] }];
 		fill($('model'), models.map(m => ({ value: m.id, label: m.deprecated ? '⚠ ' + m.name : m.name })), next.model);

@@ -132,15 +132,19 @@ test('the key picker shows the active key and switches, forgets and adds keys', 
 	assert.equal($('keyMenu').hidden, false);
 	assert.equal($('keyButton').getAttribute('aria-expanded'), 'true');
 	assert.equal($('keyList').querySelectorAll('.key-item').length, 2);
-	assert.equal($('keyList').querySelectorAll('.key-forget').length, 1, 'the active key cannot be forgotten');
+	assert.equal($('keyList').querySelectorAll('.key-forget').length, 2, 'every key can be forgotten, including the active one');
 
-	const forget = $('keyList').querySelector('.key-forget') as HTMLElement;
+	const forget = $('keyList').querySelectorAll('.key-forget')[1] as HTMLElement;
 	const before = posted.length;
 	forget.click();
 	assert.equal(posted.length, before, 'first click only asks');
 	assert.equal(forget.textContent, 'Forget?');
 	forget.click();
 	assert.deepEqual(posted.at(-1), { type: 'forgetKey', value: 'k2' });
+	const forgetActive = $('keyList').querySelectorAll('.key-forget')[0] as HTMLElement;
+	forgetActive.click();
+	forgetActive.click();
+	assert.deepEqual(posted.at(-1), { type: 'forgetKey', value: 'k1' });
 
 	($('keyList').querySelectorAll('.key-pick')[1] as HTMLElement).click();
 	assert.deepEqual(posted.at(-1), { type: 'switchKey', value: 'k2' });
@@ -165,6 +169,9 @@ test('the key picker shows the active key and switches, forgets and adds keys', 
 	$('keyButton').click();
 	win.document.body.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 	assert.equal($('keyMenu').hidden, true, 'clicking elsewhere closes it');
+	$('keyButton').click();
+	send({ ...STATE, hasKey: false, keys: [] });
+	assert.equal($('keyMenu').hidden, true, 'removing the last key closes the panel for the setup screen');
 });
 
 test('permission card answers once and tool output is plain text', () => {

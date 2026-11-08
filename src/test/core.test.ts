@@ -447,6 +447,34 @@ test('context is summarized when nearly full', async () => {
 	} finally { clean(); }
 });
 
+test('a chat nearing the gateway size limit is summarized even with a huge context window', async () => {
+	const { root, clean } = workspace();
+	try {
+		const big = 'w'.repeat(400_000);
+		const messages: ChatMessage[] = [{ role: 'user', content: big }, { role: 'assistant', content: 'a' }, { role: 'user', content: big }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'latest' }];
+		const events: AgentEvent[] = [];
+		const stream = scripted([[say('the summary')], [say('finished')]]);
+		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', events, messages), contextWindow: 10_000_000 });
+		assert.match(String(messages[0].content), /the summary/);
+		assert.ok(events.some(e => e.type === 'compacted'));
+		assert.ok(JSON.stringify(stream.requests[1]).length < 100_000);
+		assert.equal(messages.at(-1)?.content, 'finished');
+	} finally { clean(); }
+});
+
+test('a failed size summary still sends the request', async () => {
+	const { root, clean } = workspace();
+	try {
+		const big = 'w'.repeat(400_000);
+		const messages: ChatMessage[] = [{ role: 'user', content: big }, { role: 'assistant', content: 'a' }, { role: 'user', content: big }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'latest' }];
+		const events: AgentEvent[] = [];
+		const stream = scripted([[], [say('finished')]]);
+		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', events, messages), contextWindow: 10_000_000 });
+		assert.ok(events.some(e => e.type === 'notice' && /Could not summarize/.test(e.message)));
+		assert.equal(messages.at(-1)?.content, 'finished');
+	} finally { clean(); }
+});
+
 const toolTurn = (id: string, name: string, args: object, output: string): ChatMessage[] => [
 	{ role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] },
 	{ role: 'tool', tool_call_id: id, content: output },

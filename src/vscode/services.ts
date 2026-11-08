@@ -236,8 +236,17 @@ export class Services implements vscode.Disposable {
 		await this.context.secrets.store(API_KEY_SECRET, chosen.key);
 	}
 
+	/** Removes a saved key. If it is the one in use, 8bot moves to another saved key, or to setup when none is left. */
 	async forgetKey(id: string): Promise<void> {
-		await this.storeKeyring((await this.keyring()).filter(k => k.id !== id));
+		const ring = await this.keyring();
+		const chosen = ring.find(k => k.id === id);
+		if (!chosen) { return; }
+		const rest = ring.filter(k => k.id !== id);
+		// The active key moves first, or savedKeys would add the forgotten key back as an unsaved active key.
+		if (chosen.key === await this.context.secrets.get(API_KEY_SECRET)) {
+			if (rest[0]) { await this.switchKey(rest[0].id); } else { await this.clearApiKey(); }
+		}
+		await this.storeKeyring(rest);
 	}
 
 	async connectPax8(): Promise<void> {

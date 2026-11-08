@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- Long chats are summarized automatically as they near the gateway's size limit, so older context is condensed instead of left out. Models with very large context windows reach that limit long before their token limit.
+- Every saved key can now be removed from the key icon, including the one in use. 8bot moves to another saved key, or back to setup if none is left.
+
 ## 0.1.12
 
 - Fix "The gateway rejected your API key (401)" on long chats with a working key. The gateway answers 401 to any request over about 1 MB, so 8bot now keeps requests under that by leaving out old images first, then old tool output, then the oldest turns. The saved chat is not changed.

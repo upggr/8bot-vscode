@@ -1,5 +1,6 @@
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, flattenForSummary, KEEP_TOKENS_AFTER_COMPACT, keepTokensFor, looksLikeOverflow, SUMMARY_PREFIX, trimForRequest } from './context';
 import { decide, PermissionMode, rememberKey, ToolKind } from './permissions';
+import { byteSize, COMPACT_REQUEST_BYTES } from './requestSize';
 import { findTool, Tool, TOOLS, ToolContext } from './tools';
 import { ChatMessage, ChatStreamer, ToolCall, Usage } from './types';
 
@@ -102,9 +103,9 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 	let emptyReplies = 0;
 	let maxTokens = options.maxTokens;
 
-	const summarize = async (turn: number, message: string): Promise<boolean> => {
+	const summarize = async (turn: number, message: string, keepTokens = keepTokensFor(contextWindow)): Promise<boolean> => {
 		onEvent({ type: 'notice', message });
-		const removed = await compact(options, keepTokensFor(contextWindow));
+		const removed = await compact(options, keepTokens);
 		if (removed.length === 0) { return false; }
 		lastCompaction = turn;
 		onEvent({ type: 'compacted', removed });
@@ -117,6 +118,19 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 		if (contextWindow && estimate * calibration > compactLimit(contextWindow)
 			&& turn - lastCompaction >= MIN_TURNS_BETWEEN_COMPACTIONS && compactionCut(messages, keepTokensFor(contextWindow)) > 0) {
 			await summarize(turn, 'Context is nearly full, summarizing older messages.');
+			outgoing = trimForRequest(messages, contextWindow, calibration);
+			estimate = estimateTokens(outgoing) + overhead;
+		}
+		// Models with huge context windows reach the gateway's size limit long before their token limit.
+		if (byteSize(outgoing) > COMPACT_REQUEST_BYTES && turn - lastCompaction >= MIN_TURNS_BETWEEN_COMPACTIONS && compactionCut(messages, KEEP_TOKENS_AFTER_COMPACT) > 0) {
+			lastCompaction = turn;
+			try {
+				await summarize(turn, 'This chat is nearing the gateway size limit, summarizing older messages.', KEEP_TOKENS_AFTER_COMPACT);
+			} catch (error) {
+				if (signal?.aborted) { return; }
+				// The request can still go out, because the client leaves old content out to fit.
+				onEvent({ type: 'notice', message: `Could not summarize older messages, so some are left out of this request. ${(error as Error).message}` });
+			}
 			outgoing = trimForRequest(messages, contextWindow, calibration);
 			estimate = estimateTokens(outgoing) + overhead;
 		}

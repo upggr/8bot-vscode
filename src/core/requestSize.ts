@@ -2,6 +2,8 @@ import { ChatMessage } from './types';
 
 /** The gateway answers 401 to any request over about 1 MB, so requests stay safely under that. */
 export const MAX_REQUEST_BYTES = 900_000;
+/** Past this size the chat is summarized, so context is condensed instead of dropped. */
+export const COMPACT_REQUEST_BYTES = 750_000;
 
 const KEEP_RECENT_TOOL_RESULTS = 8;
 const MIN_SHORTENED_CHARS = 400;
