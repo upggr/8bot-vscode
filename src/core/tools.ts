@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { addMemory, removeMemory } from './memory';
 import { ToolKind } from './permissions';
 import { ToolSchema } from './types';
 
@@ -10,6 +11,8 @@ export interface ToolContext {
 	allowOutsideWorkspace: boolean;
 	commandTimeoutSeconds: number;
 	signal?: AbortSignal;
+	/** Private per-project notes that carry across chats. */
+	memoryFile?: string;
 }
 
 type Args = Record<string, unknown>;
@@ -25,7 +28,8 @@ export interface Tool {
 
 export class ToolError extends Error {}
 
-const MAX_OUTPUT = 30_000;
+const MAX_OUTPUT = 50_000;
+const MAX_READ_OUTPUT = 200_000;
 const MAX_READ_LINES = 2_000;
 const MAX_SEARCH_FILE = 1_048_576;
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', 'target', 'vendor', '__pycache__', '.venv', '.vscode-test']);
@@ -162,7 +166,7 @@ const readFile: Tool = {
 		const count = Math.min(Number(args.limit ?? MAX_READ_LINES), MAX_READ_LINES);
 		const shown = lines.slice(start, start + count).map((line, i) => `${start + i + 1}\t${line}`).join('\n');
 		const more = start + count < lines.length ? `\n[${lines.length - start - count} more lines. Use offset to continue.]` : '';
-		return truncate(shown) + more;
+		return truncate(shown, MAX_READ_OUTPUT) + more;
 	},
 };
 
@@ -320,7 +324,31 @@ const runCommand: Tool = {
 	},
 };
 
-export const TOOLS: Tool[] = [readFile, listFiles, searchText, writeFile, editFile, runCommand];
+const remember: Tool = {
+	schema: schema('remember', 'Save a lasting fact about this project or the user\'s preferences so future chats know it. Never save secrets.', {
+		note: { type: 'string', description: 'One short, self-contained fact' },
+	}, ['note']),
+	kind: () => 'edit',
+	summary: a => `Remember: ${a.note}`,
+	async run(args, ctx) {
+		if (!ctx.memoryFile) { throw new ToolError('Memory is not available here.'); }
+		return await addMemory(ctx.memoryFile, String(args.note ?? '')) ? 'Saved to memory.' : 'That note was already saved.';
+	},
+};
+
+const forget: Tool = {
+	schema: schema('forget', 'Remove saved memory notes containing the given text, for example when a fact is out of date.', {
+		text: { type: 'string', description: 'Text that appears in the notes to remove' },
+	}, ['text']),
+	kind: () => 'edit',
+	summary: a => `Forget notes about: ${a.text}`,
+	async run(args, ctx) {
+		if (!ctx.memoryFile) { throw new ToolError('Memory is not available here.'); }
+		return `Removed ${await removeMemory(ctx.memoryFile, String(args.text ?? ''))} notes.`;
+	},
+};
+
+export const TOOLS: Tool[] = [readFile, listFiles, searchText, writeFile, editFile, runCommand, remember, forget];
 
 export function findTool(name: string): Tool | undefined {
 	return TOOLS.find(t => t.schema.function.name === name);

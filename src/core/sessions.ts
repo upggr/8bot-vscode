@@ -8,6 +8,8 @@ export interface Session {
 	title: string;
 	updatedAt: number;
 	messages: ChatMessage[];
+	/** Older messages replaced by a summary, kept only so the chat stays readable. */
+	archive?: ChatMessage[];
 }
 
 export interface SessionSummary {

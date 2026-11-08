@@ -5,10 +5,13 @@ import { AddressInfo } from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
-import { runAgent, AgentEvent, PermissionAnswer } from '../core/agent';
+import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } from '../core/agent';
+import { compactLimit, compactionCut, estimateTokens, keepTokensFor, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
+import { addMemory, readMemory } from '../core/memory';
 import { decide, PermissionMode, rememberKey } from '../core/permissions';
+import { buildSystemPrompt } from '../core/prompt';
 import { newSession, SessionStore } from '../core/sessions';
 import { findTool, globToRegExp, isSensitivePath, ToolContext } from '../core/tools';
 import { ChatMessage, ChatStreamer, StreamEvent, ToolCall } from '../core/types';
@@ -79,6 +82,67 @@ test('assembles streamed tool calls whose id arrives only once', async () => {
 	assert.match(idempotency ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 	assert.equal(agent, '8bot-vscode');
 	assert.equal(feature, 'sidebar');
+});
+
+const REJECTED = JSON.stringify({ type: 'error', error: { message: 'The model provider rejected this request. Check the model, parameters and input size, then retry; if the problem persists, contact support with the correlation_id.', type: 'invalid_request_error', code: '400', correlation_id: 'x' } });
+const DEEPSEEK_MODELS = { data: [
+	{ id: 'claude', display_name: 'Claude' },
+	{ id: 'deepseek-no-tools', display_name: 'No Tools', features: { tools: false } },
+	{ id: 'deepseek-v4-pro', display_name: 'DeepSeek V4 Pro', features: { tools: true } },
+	{ id: 'deepseek-v4.1-flash', display_name: 'DeepSeek Flash', features: { tools: true } },
+] };
+const TOOL = { type: 'function' as const, function: { name: 't', description: 'd', parameters: {} } };
+
+function failoverGateway(models: object, rejection = REJECTED) {
+	const used: string[] = [];
+	handler = (req, res) => {
+		if (req.method === 'GET') { res.end(JSON.stringify(models)); return; }
+		let raw = '';
+		req.on('data', c => { raw += c; });
+		req.on('end', () => {
+			const { model } = JSON.parse(raw) as { model: string };
+			used.push(model);
+			if (model === 'auto') { res.writeHead(400).end(rejection); return; }
+			sse(res, [{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+		});
+	};
+	return used;
+}
+
+test('auto fails over to a tool-capable DeepSeek model and stays there', async () => {
+	const used = failoverGateway(DEEPSEEK_MODELS);
+	const c = client();
+	const first = await collect(c.streamChat({ model: 'auto', messages: [], tools: [TOOL] }));
+	assert.deepEqual(first[0], { type: 'failover', model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 128000 });
+	assert.ok(first.some(e => e.type === 'text'));
+	const second = await collect(c.streamChat({ model: 'auto', messages: [], tools: [TOOL] }));
+	assert.ok(!second.some(e => e.type === 'failover'));
+	assert.deepEqual(used, ['auto', 'deepseek-v4-pro', 'deepseek-v4-pro']);
+});
+
+test('no failover for a chosen model, another 400, or when DeepSeek is unavailable', async () => {
+	let used = failoverGateway(DEEPSEEK_MODELS);
+	handler = (req, res) => { used.push('x'); req.resume(); res.writeHead(400).end(REJECTED); };
+	await assert.rejects(collect(client().streamChat({ model: 'claude', messages: [] })), /model provider rejected/);
+	assert.deepEqual(used, ['x']);
+
+	used = failoverGateway(DEEPSEEK_MODELS, JSON.stringify({ error: { message: 'messages is required' } }));
+	await assert.rejects(collect(client().streamChat({ model: 'auto', messages: [] })), /messages is required/);
+	assert.deepEqual(used, ['auto']);
+
+	used = failoverGateway({ data: [{ id: 'claude' }] });
+	await assert.rejects(collect(client().streamChat({ model: 'auto', messages: [] })), /model provider rejected/);
+	assert.deepEqual(used, ['auto']);
+});
+
+test('the agent tells the user about a failover', async () => {
+	const { root, clean } = workspace();
+	try {
+		const events: AgentEvent[] = [];
+		const stream = scripted([[{ type: 'failover', model: 'd', name: 'DeepSeek', contextWindow: 1000 }, say('ok')]]);
+		await runAgent(agentOptions(stream, root, 'default', 'allow', events));
+		assert.ok(events.some(e => e.type === 'notice' && e.message.includes('DeepSeek')));
+	} finally { clean(); }
 });
 
 test('reports gateway guard flags', async () => {
@@ -357,6 +421,144 @@ test('context is summarized when nearly full', async () => {
 		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', [], messages), contextWindow: 100 });
 		assert.match(String(messages[0].content), /the summary/);
 		assert.equal(messages.at(-1)?.content, 'finished');
+	} finally { clean(); }
+});
+
+const toolTurn = (id: string, name: string, args: object, output: string): ChatMessage[] => [
+	{ role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] },
+	{ role: 'tool', tool_call_id: id, content: output },
+];
+
+test('an earlier read of the same file is dropped from the request but kept in the chat', () => {
+	const messages: ChatMessage[] = [
+		{ role: 'user', content: 'go' },
+		...toolTurn('1', 'read_file', { path: 'a.ts' }, 'old content'),
+		...toolTurn('2', 'read_file', { path: 'b.ts' }, 'other file'),
+		...toolTurn('3', 'read_file', { path: 'a.ts' }, 'new content'),
+	];
+	const sent = trimForRequest(messages);
+	assert.match(String(sent[2].content), /Superseded/);
+	assert.equal(sent[4].content, 'other file');
+	assert.equal(sent[6].content, 'new content');
+	assert.equal(messages[2].content, 'old content');
+});
+
+test('old tool output is shortened past the limit and recent output is untouched', () => {
+	const big = 'x'.repeat(40_000);
+	const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+	for (let i = 0; i < 12; i++) { messages.push(...toolTurn(String(i), 'run_command', { command: `c${i}` }, big)); }
+	const sent = trimForRequest(messages, 100_000);
+	const tools = sent.filter(m => m.role === 'tool');
+	assert.match(String(tools[0].content), /Older output removed/);
+	assert.ok(tools.slice(-8).every(m => m.content === big));
+	assert.ok(estimateTokens(sent) < estimateTokens(messages));
+	assert.equal(messages[2].content, big);
+	assert.ok(trimForRequest(messages, 1_000_000).filter(m => m.role === 'tool').every(m => m.content === big), 'large models keep everything until they are well filled');
+});
+
+test('compaction never starts the kept part on a tool result', () => {
+	const big = 'y'.repeat(100_000);
+	const messages: ChatMessage[] = [{ role: 'user', content: 'a' }, ...toolTurn('1', 'run_command', { command: 'x' }, big), { role: 'user', content: 'b' }, ...toolTurn('2', 'run_command', { command: 'y' }, 'small')];
+	const cut = compactionCut(messages, 1_000);
+	assert.notEqual(messages[cut].role, 'tool');
+	assert.equal(cut, 3);
+	assert.equal(compactionCut([{ role: 'user', content: 'only' }], 1_000), 0);
+});
+
+test('compaction keeps recent work, returns what it removed and sends no tool messages', async () => {
+	const messages: ChatMessage[] = [{ role: 'user', content: 'first' }, ...toolTurn('1', 'run_command', { command: 'x' }, 'z'.repeat(100_000)), { role: 'user', content: 'latest' }];
+	const stream = scripted([[say('short summary')]]);
+	const removed = await compact({ client: stream, model: 'm', messages }, 1_000);
+	assert.equal(removed.length, 3);
+	assert.equal(messages.length, 2);
+	assert.match(String(messages[0].content), /short summary/);
+	assert.equal(messages[1].content, 'latest');
+	assert.ok(stream.requests[0].every(m => m.role === 'user'));
+	assert.deepEqual(await compact({ client: stream, model: 'm', messages: [{ role: 'user', content: 'x' }] }), []);
+});
+
+test('summaries shorten tool output', () => {
+	const text = flattenForSummary(toolTurn('1', 'run_command', { command: 'x' }, 'q'.repeat(9_000)));
+	assert.ok(text.length < 3_000);
+	assert.match(text, /called run_command/);
+});
+
+test('cache markers cover the system prompt, and the latest message only on verified models', () => {
+	const messages: ChatMessage[] = [{ role: 'user', content: 'hi' }];
+	const claude = withCacheMarkers('s', messages, 'claude-haiku-5-5');
+	assert.deepEqual(claude[0].content, [{ type: 'text', text: 's', cache_control: { type: 'ephemeral' } }]);
+	assert.deepEqual(claude[1].content, [{ type: 'text', text: 'hi', cache_control: { type: 'ephemeral' } }]);
+	assert.equal(withCacheMarkers('s', messages, 'gpt-5')[1].content, 'hi');
+	assert.equal(messages[0].content, 'hi');
+});
+
+test('overflow detection uses clear errors, or the generic rejection on a large request', () => {
+	const generic = new GatewayError('Gateway error 400: The model provider rejected this request.', 400);
+	assert.ok(looksLikeOverflow(new GatewayError('context_length_exceeded', 400), 1, 100));
+	assert.ok(looksLikeOverflow(generic, 50, 100));
+	assert.ok(!looksLikeOverflow(generic, 10, 100));
+	assert.ok(!looksLikeOverflow(new GatewayError('bad model', 400), 90, 100));
+});
+
+test('a too-large request is summarized and retried once', async () => {
+	const { root, clean } = workspace();
+	try {
+		const messages: ChatMessage[] = [{ role: 'user', content: 'old' }, ...toolTurn('1', 'run_command', { command: 'x' }, 'z'.repeat(200_000)), { role: 'user', content: 'now' }];
+		let calls = 0;
+		const stream: ChatStreamer = {
+			async *streamChat() {
+				calls++;
+				if (calls === 1 || calls === 3) { if (calls === 1) { throw new GatewayError('context_length_exceeded', 400); } }
+				yield say(calls === 2 ? 'the summary' : 'answered');
+			},
+		};
+		const events: AgentEvent[] = [];
+		await runAgent(agentOptions(stream, root, 'default', 'allow', events, messages));
+		assert.equal(calls, 3);
+		assert.equal(messages.at(-1)?.content, 'answered');
+		assert.ok(events.some(e => e.type === 'compacted'));
+
+		let failures = 0;
+		const always: ChatStreamer = { async *streamChat() { failures++; if (failures !== 2) { throw new GatewayError('context_length_exceeded', 400); } yield say('s'); } };
+		const again: ChatMessage[] = [{ role: 'user', content: 'old' }, ...toolTurn('1', 'run_command', { command: 'x' }, 'z'.repeat(200_000)), { role: 'user', content: 'now' }];
+		await assert.rejects(runAgent(agentOptions(always, root, 'default', 'allow', [], again)), /context_length/);
+		assert.equal(failures, 3);
+	} finally { clean(); }
+});
+
+test('memory saves, avoids duplicates, removes and survives across chats', async () => {
+	const { root, ctx, clean } = workspace();
+	try {
+		const file = path.join(root, 'nested', 'memory.md');
+		const withMemory = { ...ctx, memoryFile: file };
+		assert.equal(await tool('remember').run({ note: 'Uses  pnpm\nnot npm' }, withMemory), 'Saved to memory.');
+		assert.equal(await tool('remember').run({ note: 'Uses pnpm not npm' }, withMemory), 'That note was already saved.');
+		await addMemory(file, 'Deploys to Coolify');
+		assert.equal(await readMemory(file), '- Uses pnpm not npm\n- Deploys to Coolify');
+		assert.match(buildSystemPrompt({ root, mode: 'default', memory: await readMemory(file) }), /Saved memory[\s\S]*Deploys to Coolify/);
+		assert.equal(await tool('forget').run({ text: 'PNPM' }, withMemory), 'Removed 1 notes.');
+		assert.equal(await readMemory(file), '- Deploys to Coolify');
+		await assert.rejects(tool('remember').run({ note: 'x' }, ctx), /not available/);
+		assert.equal(tool('remember').kind({}, ctx), 'edit');
+		assert.equal(decide('plan', tool('remember').kind({}, ctx)), 'deny');
+	} finally { clean(); }
+});
+
+test('recent work kept after a summary scales with the model', () => {
+	assert.equal(keepTokensFor(undefined), 40_000);
+	assert.equal(keepTokensFor(128_000), 40_000);
+	assert.equal(keepTokensFor(1_000_000), 150_000);
+	assert.equal(keepTokensFor(10_000), 4_000);
+	assert.equal(compactLimit(1_000_000), 850_000);
+});
+
+test('large files are readable', async () => {
+	const { root, ctx, clean } = workspace();
+	try {
+		fs.writeFileSync(path.join(root, 'big.txt'), Array.from({ length: 1500 }, (_, i) => `line ${i} ${'a'.repeat(100)}`).join('\n'));
+		const out = await tool('read_file').run({ path: 'big.txt' }, ctx);
+		assert.ok(!out.includes('omitted'));
+		assert.match(out, /1500\tline 1499/);
 	} finally { clean(); }
 });
 

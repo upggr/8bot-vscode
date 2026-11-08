@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { SUMMARY_PREFIX, estimateTokens } from '../core/context';
 import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
 import { GatewayClient, GatewayError } from '../core/gateway';
+import { addMemory, readMemory, removeMemory } from '../core/memory';
 import { isPermissionMode, PERMISSION_MODES } from '../core/permissions';
 import { buildSystemPrompt, loadProjectInstructions } from '../core/prompt';
 import { newSession, Session, SessionStore } from '../core/sessions';
@@ -12,6 +14,7 @@ import { ChatMessage } from '../core/types';
 import { Services } from './services';
 
 const DIFF_SCHEME = 'eightbot-diff';
+const ARCHIVED_TOOL_CHARS = 4_000;
 const CONTEXT_OPEN = '\n\n<editor_context>';
 const HELP = [
 	'**Commands**',
@@ -20,6 +23,9 @@ const HELP = [
 	'- `/model <id>` switch model',
 	'- `/mode <default|acceptEdits|plan|bypassPermissions>` switch permission mode',
 	'- `/credits` show spend and credits',
+	'- `/remember <note>` save a fact for future chats',
+	'- `/forget <text>` remove saved notes containing the text',
+	'- `/memory` open saved memory',
 ].join('\n');
 
 interface WebviewMessage {
@@ -45,6 +51,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	private readonly diffContent = new Map<string, string>();
 	private readonly subscriptions: vscode.Disposable[] = [];
 	private lastPromptTokens = 0;
+	private restored = false;
 
 	constructor(private readonly context: vscode.ExtensionContext, private readonly services: Services) {
 		const base = context.storageUri ?? context.globalStorageUri;
@@ -112,6 +119,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	private async onMessage(message: WebviewMessage): Promise<void> {
 		switch (message.type) {
 			case 'ready':
+				await this.restoreLastSession();
 				await this.postState();
 				await this.postTranscript();
 				break;
@@ -175,13 +183,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		await vscode.commands.executeCommand('vscode.diff', left, right, `Proposed change: ${path.basename(preview.path)}`, { preview: true });
 	}
 
+	/** Reopening VS Code brings back the latest chat instead of an empty one. */
+	private async restoreLastSession(): Promise<void> {
+		if (this.restored || this.session.messages.length > 0) { return; }
+		this.restored = true;
+		const [latest] = await this.store.list();
+		if (latest) { await this.loadSession(latest.id); }
+	}
+
 	private async loadSession(id: string): Promise<void> {
 		if (this.abort) { return; }
 		const session = await this.store.load(id);
 		if (session) {
 			this.session = session;
 			this.remembered = new Set();
-			this.lastPromptTokens = 0;
+			this.lastPromptTokens = estimateTokens(session.messages);
 			await this.postTranscript();
 			await this.postState();
 		}
@@ -222,7 +238,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	}
 
 	private async postTranscript(): Promise<void> {
-		this.post({ type: 'transcript', items: transcriptItems(this.session.messages) });
+		this.post({ type: 'transcript', items: transcriptItems([...(this.session.archive ?? []), ...this.session.messages]) });
 	}
 
 	private async send(text: string, includeSelection: boolean): Promise<void> {
@@ -261,6 +277,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				messages: this.session.messages,
 				root,
 				systemPrompt: await this.systemPrompt(root),
+				memoryFile: services.memoryFile,
 				commandTimeoutSeconds: services.config.get<number>('commandTimeoutSeconds', 120),
 				maxTurns: services.config.get<number>('maxTurns', 50),
 				maxTokens: services.config.get<number>('maxOutputTokens') || undefined,
@@ -290,11 +307,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			root,
 			mode: this.services.mode,
 			projectInstructions: await loadProjectInstructions(root),
+			memory: await readMemory(this.services.memoryFile),
 			customInstructions: this.services.config.get<string>('customInstructions'),
 		});
 	}
 
+	private archive(removed: ChatMessage[]): void {
+		const kept = removed.map(m => typeof m.content === 'string' && m.role === 'tool' ? { ...m, content: m.content.slice(0, ARCHIVED_TOOL_CHARS) } : m);
+		this.session.archive = [...(this.session.archive ?? []), ...kept];
+	}
+
 	private onAgentEvent(event: AgentEvent): void {
+		if (event.type === 'compacted') {
+			this.archive(event.removed);
+			return;
+		}
 		if (event.type === 'usage') { this.lastPromptTokens = event.usage.promptTokens; }
 		this.post({ type: 'event', event });
 	}
@@ -337,6 +364,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			case '/credits':
 				this.post({ type: 'event', event: { type: 'info', text: `**${this.services.credits.label}**\n\n${this.services.credits.detail}` } });
 				return true;
+			case '/remember':
+				if (!value) { return false; }
+				await addMemory(this.services.memoryFile, value);
+				this.post({ type: 'event', event: { type: 'notice', message: 'Saved to memory for future chats.' } });
+				return true;
+			case '/forget':
+				if (!value) { return false; }
+				this.post({ type: 'event', event: { type: 'notice', message: `Removed ${await removeMemory(this.services.memoryFile, value)} notes.` } });
+				return true;
+			case '/memory':
+				await this.services.openMemory();
+				return true;
 			case '/compact':
 				await this.compactSession();
 				return true;
@@ -353,8 +392,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		this.abort = abort;
 		await this.postState();
 		try {
-			await compact({ client, model: this.services.model, systemPrompt: await this.systemPrompt(root), messages: this.session.messages, signal: abort.signal });
-			this.lastPromptTokens = 0;
+			const removed = await compact({ client, model: this.services.model, messages: this.session.messages, signal: abort.signal });
+			if (removed.length === 0) {
+				this.post({ type: 'event', event: { type: 'notice', message: 'There is nothing older to summarize yet.' } });
+				return;
+			}
+			this.archive(removed);
+			this.lastPromptTokens = estimateTokens(this.session.messages);
 			await this.store.save(this.session);
 			await this.postTranscript();
 		} catch (error) {
@@ -433,7 +477,9 @@ export function transcriptItems(messages: ChatMessage[]): object[] {
 	const results = new Map(messages.filter(m => m.role === 'tool').map(m => [m.tool_call_id, String(m.content ?? '')]));
 	const items: object[] = [];
 	for (const message of messages) {
-		if (message.role === 'user') {
+		if (message.role === 'user' && typeof message.content === 'string' && message.content.startsWith(SUMMARY_PREFIX)) {
+			items.push({ kind: 'notice', text: 'Older messages above were summarized to save context.' });
+		} else if (message.role === 'user') {
 			items.push({ kind: 'user', text: visibleUserText(message.content) });
 		} else if (message.role === 'assistant') {
 			if (typeof message.content === 'string' && message.content) { items.push({ kind: 'assistant', text: message.content }); }

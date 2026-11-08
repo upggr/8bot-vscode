@@ -11,7 +11,7 @@ description: Every setting for 8bot for VS Code, including gateway URL, model, p
 | `eightbot.defaultModel` | `auto` | Model used until you pick another |
 | `eightbot.permissionMode` | `default` | Permission mode at startup |
 | `eightbot.reasoningEffort` | empty | Used when the model supports it |
-| `eightbot.maxTurns` | `50` | Model turns per request |
+| `eightbot.maxTurns` | `200` | Model turns per request |
 | `eightbot.maxOutputTokens` | `0` | Output limit per turn, 0 for the model default |
 | `eightbot.commandTimeoutSeconds` | `120` | Default command timeout |
 | `eightbot.customInstructions` | empty | Added to every conversation |

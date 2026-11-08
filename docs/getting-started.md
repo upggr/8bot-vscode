@@ -48,7 +48,16 @@ Open a folder, type a request such as `Add tests for the date helpers` and press
 | `/model <id>` | Switch model |
 | `/mode <mode>` | Switch permission mode |
 | `/credits` | Show spend and credits |
+| `/remember <note>` | Save a fact for future chats |
+| `/forget <text>` | Remove saved notes |
+| `/memory` | Open saved memory |
 | `/help` | List commands |
+
+## Memory and long tasks
+
+8bot remembers lasting facts about each project across chats. It can save them itself when you approve, or you can use `/remember <note>`, `/forget <text>` and `/memory`. Notes are stored privately on your computer, outside the repository. Your latest chat also comes back when you reopen VS Code.
+
+Large models keep most of their context window available. When a conversation gets very long, 8bot summarizes the oldest part and keeps recent work in full.
 
 ## Project instructions
 

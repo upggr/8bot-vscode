@@ -5,7 +5,7 @@ export interface ToolCall {
 }
 
 export type ContentPart =
-	| { type: 'text'; text: string }
+	| { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
 	| { type: 'image_url'; image_url: { url: string } };
 
 export interface ChatMessage {
@@ -24,6 +24,8 @@ export interface Usage {
 	promptTokens: number;
 	completionTokens: number;
 	cost?: number;
+	/** Input tokens served from the prompt cache. */
+	cachedTokens?: number;
 	/** The model that actually answered, which matters when routing with `auto`. */
 	model?: string;
 }
@@ -46,6 +48,7 @@ export type StreamEvent =
 	| { type: 'tool_call'; call: ToolCall }
 	| { type: 'usage'; usage: Usage }
 	| { type: 'guard'; result: string; risk: string; recommendation: string }
+	| { type: 'failover'; model: string; name: string; contextWindow: number }
 	| { type: 'finish'; reason: string };
 
 export interface ChatRequest {

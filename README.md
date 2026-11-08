@@ -28,7 +28,8 @@ It works in its own sidebar, as **`@8bot` in the VS Code Chat window**, and as a
 - **Diff preview** before you approve a file change.
 - **Credits and spend** in the status bar and chat, with the exact gateway cost of every request.
 - **Project instructions** from `AGENTS.md` or `8BOT.md`.
-- **Automatic context summarizing** when a conversation gets long, or on demand with `/compact`.
+- **Project memory** that carries lasting facts across chats, and your latest chat restored when VS Code reopens.
+- **Large context for real work:** models use most of their context window, with prompt caching and automatic summarizing that keeps recent work in full.
 - **Secure by default:** your key stays in VS Code secret storage and is removed from the environment of agent commands.
 
 ## Quick start

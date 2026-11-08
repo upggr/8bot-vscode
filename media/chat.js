@@ -153,7 +153,7 @@
 			}
 			case 'usage':
 				if (event.usage.model && state.model === 'auto') { $('model').title = 'Routed to ' + event.usage.model; }
-				showContext(event.usage.promptTokens);
+				showContext(event.usage.promptTokens, event.usage.cachedTokens);
 				break;
 			case 'notice':
 				endAssistant();
@@ -177,9 +177,11 @@
 		}
 	}
 
-	function showContext(tokens) {
+	function showContext(tokens, cached) {
 		const model = (state.models || []).find(m => m.id === state.model);
-		$('contextUsage').textContent = tokens && model ? Math.min(100, Math.round(tokens / model.contextWindow * 100)) + '% context' : '';
+		const meter = $('contextUsage');
+		meter.textContent = tokens && model ? Math.min(100, Math.round(tokens / model.contextWindow * 100)) + '% context' : '';
+		meter.title = tokens && model ? tokens.toLocaleString() + ' of ' + model.contextWindow.toLocaleString() + ' tokens' + (cached ? ', ' + cached.toLocaleString() + ' from cache' : '') : '';
 	}
 
 	function applyState(next) {
@@ -222,6 +224,8 @@
 		items.forEach(item => {
 			if (item.kind === 'user') {
 				add(element('div', 'message user', item.text));
+			} else if (item.kind === 'notice') {
+				add(element('div', 'message notice', item.text));
 			} else if (item.kind === 'assistant') {
 				add(element('div', 'message assistant')).innerHTML = render(item.text);
 			} else {

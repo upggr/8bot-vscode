@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1
+
+- When automatic routing is rejected by the model provider, retry on an available DeepSeek model.
+- Send less repeated context: drop superseded file reads and shorten old tool output.
+- Summarize older messages while keeping recent work, and keep the full chat visible.
+- Recover from oversized requests by summarizing and retrying once.
+- Use prompt caching, and show cached tokens on the context meter.
+- Add project memory across chats with `/remember`, `/forget` and `/memory`.
+- Restore the latest chat when VS Code reopens.
+- Allow larger file reads and longer agent runs.
+
 ## 0.1.0
 
 First release.

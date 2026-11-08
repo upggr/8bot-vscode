@@ -4,6 +4,8 @@ import { ChatRequest, ChatStreamer, ModelInfo, StreamEvent, ToolCall, Usage } fr
 export const DEFAULT_BASE_URL = 'https://api.8os.com';
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const AUTO_MODEL = 'auto';
+const FAILOVER_MODEL = /deepseek/i;
 const MAX_RETRIES = 3;
 
 export class GatewayError extends Error {
@@ -72,6 +74,8 @@ export class GatewayClient implements ChatStreamer {
 	private readonly agentId?: string;
 	private readonly feature?: string;
 	private readonly onUsage?: (usage: Usage) => void;
+	/** Once automatic routing fails, later turns on this client skip straight to this model. */
+	private failoverModel?: string;
 
 	constructor(options: GatewayOptions) {
 		this.baseUrl = normalizeBaseUrl(options.baseUrl);
@@ -114,9 +118,9 @@ export class GatewayClient implements ChatStreamer {
 		};
 	}
 
-	async *streamChat(request: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+	private postChat(request: ChatRequest, model: string, signal?: AbortSignal): Promise<Response> {
 		const body: Record<string, unknown> = {
-			model: request.model,
+			model,
 			messages: request.messages,
 			stream: true,
 			stream_options: { include_usage: true },
@@ -127,14 +131,33 @@ export class GatewayClient implements ChatStreamer {
 		}
 		if (request.maxTokens) { body.max_tokens = request.maxTokens; }
 		if (request.reasoningEffort) { body.reasoning_effort = request.reasoningEffort; }
-
-		const response = await this.send('/v1/chat/completions', {
+		return this.send('/v1/chat/completions', {
 			method: 'POST',
 			// One key across retries, so a retried request is not billed twice.
 			headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Idempotency-Key': uuidV7() },
 			body: JSON.stringify(body),
 			signal,
 		});
+	}
+
+	private async findFailoverModel(request: ChatRequest, signal?: AbortSignal): Promise<ModelInfo | undefined> {
+		const models = await this.listModels(signal);
+		return models.find(m => FAILOVER_MODEL.test(m.id) && (!request.tools?.length || m.supportsTools));
+	}
+
+	async *streamChat(request: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+		const model = request.model === AUTO_MODEL && this.failoverModel ? this.failoverModel : request.model;
+		let response: Response;
+		try {
+			response = await this.postChat(request, model, signal);
+		} catch (error) {
+			if (model !== AUTO_MODEL || !isProviderRejection(error)) { throw error; }
+			const fallback = await this.findFailoverModel(request, signal).catch(() => undefined);
+			if (!fallback) { throw error; }
+			this.failoverModel = fallback.id;
+			yield { type: 'failover', model: fallback.id, name: fallback.name, contextWindow: fallback.contextWindow };
+			response = await this.postChat(request, fallback.id, signal);
+		}
 		if (!response.body) {
 			throw new GatewayError('The gateway returned an empty response.');
 		}
@@ -240,6 +263,11 @@ interface RawLimit {
 	periodResetTime?: string | null;
 }
 
+/** The gateway's automatic routing intermittently picks a provider that refuses the request. */
+export function isProviderRejection(error: unknown): boolean {
+	return error instanceof GatewayError && error.status === 400 && /model provider rejected/i.test(error.message);
+}
+
 function parseError(text: string): { code?: string; message: string } {
 	try {
 		const body = JSON.parse(text) as {
@@ -270,10 +298,16 @@ interface GatewayChunk {
 	}[];
 }
 
-interface RawUsage { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+interface RawUsage {
+	prompt_tokens?: number;
+	completion_tokens?: number;
+	cost?: number;
+	cache_read_input_tokens?: number;
+	prompt_tokens_details?: { cached_tokens?: number };
+}
 
 function toUsage(raw: RawUsage, model?: string): Usage {
-	return { promptTokens: raw.prompt_tokens ?? 0, completionTokens: raw.completion_tokens ?? 0, cost: raw.cost, model };
+	return { promptTokens: raw.prompt_tokens ?? 0, completionTokens: raw.completion_tokens ?? 0, cost: raw.cost, cachedTokens: raw.prompt_tokens_details?.cached_tokens ?? raw.cache_read_input_tokens, model };
 }
 
 /** The gateway requires UUID v7 for Idempotency-Key. */

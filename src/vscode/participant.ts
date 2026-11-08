@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AgentEvent, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
 import { GatewayError } from '../core/gateway';
+import { readMemory } from '../core/memory';
 import { PermissionMode } from '../core/permissions';
 import { buildSystemPrompt, loadProjectInstructions } from '../core/prompt';
 import { ChatMessage } from '../core/types';
@@ -71,7 +72,8 @@ async function handle(
 			model,
 			messages,
 			root,
-			systemPrompt: buildSystemPrompt({ root, mode, projectInstructions: await loadProjectInstructions(root), customInstructions: services.config.get<string>('customInstructions') }),
+			systemPrompt: buildSystemPrompt({ root, mode, projectInstructions: await loadProjectInstructions(root), memory: await readMemory(services.memoryFile), customInstructions: services.config.get<string>('customInstructions') }),
+			memoryFile: services.memoryFile,
 			commandTimeoutSeconds: services.config.get<number>('commandTimeoutSeconds', 120),
 			maxTurns: services.config.get<number>('maxTurns', 50),
 			maxTokens: services.config.get<number>('maxOutputTokens') || undefined,

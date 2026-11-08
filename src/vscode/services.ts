@@ -1,6 +1,8 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { addSpend, BUY_URL, creditStatus, CreditStatus, SpendRecord } from '../core/credits';
 import { DEFAULT_BASE_URL, GatewayClient, GatewayError, LiveLimit, normalizeBaseUrl } from '../core/gateway';
+import { addMemory, readMemory } from '../core/memory';
 import { isPermissionMode, PERMISSION_MODES, PermissionMode } from '../core/permissions';
 import { ModelInfo } from '../core/types';
 
@@ -57,6 +59,18 @@ export class Services implements vscode.Disposable {
 
 	get config(): vscode.WorkspaceConfiguration {
 		return vscode.workspace.getConfiguration('eightbot');
+	}
+
+	/** Private to this project, and outside the repository so it is never committed. */
+	get memoryFile(): string {
+		return path.join((this.context.storageUri ?? this.context.globalStorageUri).fsPath, 'memory.md');
+	}
+
+	async openMemory(): Promise<void> {
+		if (!await readMemory(this.memoryFile)) {
+			await addMemory(this.memoryFile, 'Add lasting project notes here, one per line.');
+		}
+		await vscode.window.showTextDocument(vscode.Uri.file(this.memoryFile));
 	}
 
 	get hasKey(): boolean {

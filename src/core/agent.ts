@@ -1,3 +1,4 @@
+import { compactLimit, compactionCut, estimateTokens, flattenForSummary, KEEP_TOKENS_AFTER_COMPACT, keepTokensFor, looksLikeOverflow, SUMMARY_PREFIX, trimForRequest } from './context';
 import { decide, PermissionMode, rememberKey, ToolKind } from './permissions';
 import { findTool, Tool, TOOLS, ToolContext } from './tools';
 import { ChatMessage, ChatStreamer, ToolCall, Usage } from './types';
@@ -19,7 +20,8 @@ export type AgentEvent =
 	| { type: 'toolStart'; callId: string; tool: string; summary: string; args: Record<string, unknown> }
 	| { type: 'toolEnd'; callId: string; ok: boolean; output: string }
 	| { type: 'usage'; usage: Usage }
-	| { type: 'notice'; message: string };
+	| { type: 'notice'; message: string }
+	| { type: 'compacted'; removed: ChatMessage[] };
 
 export interface AgentOptions {
 	client: ChatStreamer;
@@ -37,32 +39,49 @@ export interface AgentOptions {
 	getMode(): PermissionMode;
 	requestPermission(request: PermissionRequest): Promise<PermissionAnswer>;
 	onEvent(event: AgentEvent): void;
+	/** Private per-project memory notes. */
+	memoryFile?: string;
 	/** Answers remembered with "always". Pass the same set across a conversation. */
 	remembered?: Set<string>;
 	signal?: AbortSignal;
 }
 
-const COMPACT_THRESHOLD = 0.85;
+const COMPACT_PROMPT = 'Summarize this conversation so work can continue from the summary alone. Include the user\'s goals and exact requests, decisions made, files changed, errors and how they were solved, the current state, and the next step. Output only the summary.';
+const MIN_TURNS_BETWEEN_COMPACTIONS = 3;
 
-const COMPACT_PROMPT = 'Summarize this conversation so work can continue from the summary alone. Include the user\'s goals and exact requests, decisions made, files changed, current state, and the next step. Output only the summary.';
+/** Models where marking the latest message for caching has been verified to work. */
+const CONVERSATION_CACHE_MODELS = /claude/i;
 
 export function toolSchemas() {
 	return TOOLS.map(t => t.schema);
 }
 
-/** Replaces the conversation with a model-written summary. */
-export async function compact(options: Pick<AgentOptions, 'client' | 'model' | 'systemPrompt' | 'messages' | 'signal'>): Promise<void> {
+/**
+ * Replaces older messages with a model-written summary and keeps recent work
+ * intact. Returns the messages it removed, or an empty list if nothing was old enough.
+ */
+export async function compact(options: Pick<AgentOptions, 'client' | 'model' | 'messages' | 'signal'>, keepTokens = KEEP_TOKENS_AFTER_COMPACT): Promise<ChatMessage[]> {
+	const { messages } = options;
+	const cut = compactionCut(messages, keepTokens);
+	if (cut === 0) { return []; }
 	let summary = '';
-	const request = [
-		{ role: 'system' as const, content: options.systemPrompt },
-		...options.messages,
-		{ role: 'user' as const, content: COMPACT_PROMPT },
-	];
+	const request: ChatMessage[] = [{ role: 'user', content: `${COMPACT_PROMPT}\n\n<conversation>\n${flattenForSummary(messages.slice(0, cut))}\n</conversation>` }];
 	for await (const event of options.client.streamChat({ model: options.model, messages: request }, options.signal)) {
 		if (event.type === 'text') { summary += event.text; }
 	}
 	if (!summary.trim()) { throw new Error('The model returned an empty summary.'); }
-	options.messages.splice(0, options.messages.length, { role: 'user', content: `Summary of the conversation so far:\n\n${summary}` });
+	return messages.splice(0, cut, { role: 'user', content: `${SUMMARY_PREFIX}\n\n${summary}` });
+}
+
+/** Marks stable text for the prompt cache, which greatly reduces the cost of repeated context. */
+export function withCacheMarkers(system: string, messages: ChatMessage[], model: string): ChatMessage[] {
+	const marker = { type: 'ephemeral' as const };
+	const out: ChatMessage[] = [{ role: 'system', content: [{ type: 'text', text: system, cache_control: marker }] }, ...messages];
+	const last = out.at(-1);
+	if (CONVERSATION_CACHE_MODELS.test(model) && out.length > 1 && last && typeof last.content === 'string' && last.content) {
+		out[out.length - 1] = { ...last, content: [{ type: 'text', text: last.content, cache_control: marker }] };
+	}
+	return out;
 }
 
 /** Runs model turns and tools until the model finishes, is stopped, or reaches the turn limit. */
@@ -70,17 +89,39 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 	const { client, messages, signal, onEvent } = options;
 	const remembered = options.remembered ?? new Set<string>();
 	const tools = options.supportsTools === false ? undefined : toolSchemas();
+	const overhead = Math.ceil((options.systemPrompt.length + JSON.stringify(tools ?? []).length) / 4);
+	let contextWindow = options.contextWindow;
+	let calibration = 1;
+	let lastCompaction = -MIN_TURNS_BETWEEN_COMPACTIONS;
+	let recovered = false;
+
+	const summarize = async (turn: number, message: string): Promise<boolean> => {
+		onEvent({ type: 'notice', message });
+		const removed = await compact(options, keepTokensFor(contextWindow));
+		if (removed.length === 0) { return false; }
+		lastCompaction = turn;
+		onEvent({ type: 'compacted', removed });
+		return true;
+	};
 
 	for (let turn = 0; turn < options.maxTurns; turn++) {
+		let outgoing = trimForRequest(messages, contextWindow, calibration);
+		let estimate = estimateTokens(outgoing) + overhead;
+		if (contextWindow && estimate * calibration > compactLimit(contextWindow)
+			&& turn - lastCompaction >= MIN_TURNS_BETWEEN_COMPACTIONS && compactionCut(messages, keepTokensFor(contextWindow)) > 0) {
+			await summarize(turn, 'Context is nearly full, summarizing older messages.');
+			outgoing = trimForRequest(messages, contextWindow, calibration);
+			estimate = estimateTokens(outgoing) + overhead;
+		}
+
 		let text = '';
 		const calls: ToolCall[] = [];
 		let finish = '';
-		let usage: Usage | undefined;
 
 		try {
 			const stream = client.streamChat({
 				model: options.model,
-				messages: [{ role: 'system', content: options.systemPrompt }, ...messages],
+				messages: withCacheMarkers(options.systemPrompt, outgoing, options.model),
 				tools,
 				maxTokens: options.maxTokens,
 				reasoningEffort: options.reasoningEffort,
@@ -89,13 +130,27 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 				if (event.type === 'text') { text += event.text; onEvent(event); }
 				else if (event.type === 'reasoning') { onEvent(event); }
 				else if (event.type === 'tool_call') { calls.push(event.call); }
-				else if (event.type === 'usage') { usage = event.usage; onEvent({ type: 'usage', usage }); }
+				else if (event.type === 'usage') {
+					if (event.usage.promptTokens > 0) { calibration = Math.min(Math.max(event.usage.promptTokens / estimate, 0.5), 4); }
+					onEvent({ type: 'usage', usage: event.usage });
+				}
+				else if (event.type === 'failover') {
+					contextWindow = event.contextWindow;
+					onEvent({ type: 'notice', message: `Automatic routing was rejected by the gateway, so this request continues on ${event.name}.` });
+				}
 				else if (event.type === 'guard') { onEvent({ type: 'notice', message: `The gateway guard flagged this request (result: ${event.result}, risk: ${event.risk}, recommendation: ${event.recommendation}).` }); }
 				else { finish = event.reason; }
 			}
 		} catch (error) {
 			if (text) { messages.push({ role: 'assistant', content: text }); }
 			if (signal?.aborted) { return; }
+			if (!text && !recovered && looksLikeOverflow(error, estimate * calibration, contextWindow)) {
+				recovered = true;
+				if (await summarize(turn, 'The request was too large, summarizing older messages and retrying.')) {
+					turn--;
+					continue;
+				}
+			}
 			throw error;
 		}
 
@@ -119,11 +174,6 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 			messages.push({ role: 'tool', tool_call_id: call.id, content: output });
 		}
 		if (signal?.aborted) { return; }
-
-		if (options.contextWindow && usage && usage.promptTokens > options.contextWindow * COMPACT_THRESHOLD) {
-			onEvent({ type: 'notice', message: 'Context is nearly full, summarizing the conversation.' });
-			await compact(options);
-		}
 	}
 	onEvent({ type: 'notice', message: `Stopped after ${options.maxTurns} turns. Send "continue" to keep going.` });
 }
@@ -148,6 +198,7 @@ async function executeCall(call: ToolCall, options: AgentOptions, remembered: Se
 		allowOutsideWorkspace: mode === 'bypassPermissions',
 		commandTimeoutSeconds: options.commandTimeoutSeconds,
 		signal: options.signal,
+		memoryFile: options.memoryFile,
 	};
 	onEvent({ type: 'toolStart', callId: call.id, tool: name, summary, args });
 
