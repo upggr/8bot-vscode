@@ -1,0 +1,22 @@
+name: Publish to VS Code Marketplace
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # The Marketplace refuses a version twice, so this publishes only after a version bump.
+      - run: npx vsce publish --oidc --skip-duplicate
