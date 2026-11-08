@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { outputTokenLimit } from '../core/context';
 import { ChatMessage, ContentPart, ToolCall, ToolSchema } from '../core/types';
 import { Services } from './services';
 
@@ -57,6 +58,7 @@ export class GatewayModelProvider implements vscode.LanguageModelChatProvider {
 				messages: toGatewayMessages(messages),
 				tools,
 				toolChoice: options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto',
+				maxTokens: outputTokenLimit(model.id, model.maxOutputTokens, this.services.config.get<number>('maxOutputTokens')),
 			}, abort.signal);
 			for await (const event of stream) {
 				if (event.type === 'text') {

@@ -3,6 +3,7 @@ import { AgentEvent, PermissionAnswer, PermissionRequest, runAgent } from '../co
 import { BUY_URL } from '../core/credits';
 import { GatewayError } from '../core/gateway';
 import { readMemory } from '../core/memory';
+import { outputTokenLimit } from '../core/context';
 import { PermissionMode } from '../core/permissions';
 import { buildSystemPrompt, loadProjectInstructions } from '../core/prompt';
 import { ChatMessage } from '../core/types';
@@ -67,6 +68,7 @@ async function handle(
 	const abort = new AbortController();
 	const cancel = token.onCancellationRequested(() => abort.abort());
 	try {
+		stream.progress('Thinking...');
 		await runAgent({
 			client,
 			model,
@@ -76,7 +78,8 @@ async function handle(
 			memoryFile: services.memoryFile,
 			commandTimeoutSeconds: services.config.get<number>('commandTimeoutSeconds', 120),
 			maxTurns: services.config.get<number>('maxTurns', 50),
-			maxTokens: services.config.get<number>('maxOutputTokens') || undefined,
+			maxTokens: outputTokenLimit(model, info?.maxOutputTokens, services.config.get<number>('maxOutputTokens')),
+			modelMaxOutput: info?.maxOutputTokens,
 			reasoningEffort: effort && info?.reasoningEfforts.includes(effort) ? effort : undefined,
 			contextWindow: info?.contextWindow,
 			supportsTools: info?.supportsTools,
@@ -107,6 +110,7 @@ function render(event: AgentEvent, stream: vscode.ChatResponseStream, root: stri
 			break;
 		case 'toolEnd':
 			if (!event.ok) { stream.markdown(`\n\n> ${event.output.split('\n')[0]}\n\n`); }
+			stream.progress('Thinking...');
 			break;
 		case 'notice':
 			stream.markdown(`\n\n> ${event.message}\n\n`);

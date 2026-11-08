@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { SUMMARY_PREFIX, estimateTokens } from '../core/context';
+import { SUMMARY_PREFIX, estimateTokens, outputTokenLimit } from '../core/context';
 import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
 import { GatewayClient, GatewayError } from '../core/gateway';
@@ -280,7 +280,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				memoryFile: services.memoryFile,
 				commandTimeoutSeconds: services.config.get<number>('commandTimeoutSeconds', 120),
 				maxTurns: services.config.get<number>('maxTurns', 50),
-				maxTokens: services.config.get<number>('maxOutputTokens') || undefined,
+				maxTokens: outputTokenLimit(model, info?.maxOutputTokens, services.config.get<number>('maxOutputTokens')),
+				modelMaxOutput: info?.maxOutputTokens,
 				reasoningEffort: effort && info?.reasoningEfforts.includes(effort) ? effort : undefined,
 				contextWindow: info?.contextWindow,
 				supportsTools: info?.supportsTools,
@@ -392,7 +393,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		this.abort = abort;
 		await this.postState();
 		try {
-			const removed = await compact({ client, model: this.services.model, messages: this.session.messages, signal: abort.signal });
+			const model = this.services.model;
+			const info = await this.services.modelInfo(model);
+			const removed = await compact({ client, model, messages: this.session.messages, signal: abort.signal, maxTokens: outputTokenLimit(model, info?.maxOutputTokens, this.services.config.get<number>('maxOutputTokens')) });
 			if (removed.length === 0) {
 				this.post({ type: 'event', event: { type: 'notice', message: 'There is nothing older to summarize yet.' } });
 				return;
@@ -445,6 +448,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	<div id="transcript" role="log" aria-live="polite"></div>
 	<footer>
 		<label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked> <span id="selectionText"></span></label>
+		<div id="status" class="muted" role="status" hidden></div>
 		<textarea id="input" rows="3" placeholder="Ask 8bot to build, fix or explain. Type / for commands." aria-label="Message"></textarea>
 		<div class="row">
 			<select id="model" aria-label="Model" title="Model"></select>

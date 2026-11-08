@@ -29,6 +29,19 @@ export function estimateTokens(messages: ChatMessage[]): number {
 	return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
+const DEFAULT_OUTPUT_TOKENS = 32_000;
+
+/**
+ * Output limit for a request. Without one the gateway applies 4,096 tokens,
+ * which a thinking model can use up completely before writing any answer.
+ * Automatic routing is left alone because the chosen model is not known yet.
+ */
+export function outputTokenLimit(modelId: string, modelMax: number | undefined, setting: number | undefined): number | undefined {
+	if (setting && setting > 0) { return modelMax ? Math.min(setting, modelMax) : setting; }
+	if (modelId === 'auto' || !modelMax) { return undefined; }
+	return Math.min(modelMax, DEFAULT_OUTPUT_TOKENS);
+}
+
 export function trimLimit(contextWindow: number): number {
 	return Math.min(contextWindow * TRIM_SHARE, TRIM_CEILING);
 }

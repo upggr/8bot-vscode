@@ -12,7 +12,7 @@ const BODY = `
 <main id="app" hidden>
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
-<textarea id="input"></textarea>
+<div id="status" hidden></div><textarea id="input"></textarea>
 <select id="model"></select><select id="effort" hidden></select><select id="mode"></select>
 <button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
 </main>`;
@@ -115,6 +115,20 @@ test('permission card answers once and tool output is plain text', () => {
 	assert.equal(win.document.querySelector('.tool img'), null);
 	assert.equal(win.document.querySelector('.tool summary b'), null);
 	assert.equal($('transcript').querySelector('.output')?.textContent, '<img src=x>');
+});
+
+test('a busy chat shows live progress and approval waits', () => {
+	const { send, $, dom } = load();
+	send({ ...STATE, busy: true });
+	assert.equal($('status').hidden, false);
+	assert.match($('status').textContent ?? '', /Working/);
+	send({ type: 'event', event: { type: 'permission', callId: 'x', summary: 's' } });
+	assert.match($('status').textContent ?? '', /approval/);
+	send({ type: 'event', event: { type: 'toolEnd', callId: 'x', ok: true, output: '' } });
+	assert.match($('status').textContent ?? '', /Working/);
+	send({ ...STATE, busy: false });
+	assert.equal($('status').hidden, true);
+	dom.window.close();
 });
 
 test('limit errors offer the subscription page', () => {

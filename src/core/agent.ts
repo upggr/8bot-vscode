@@ -34,6 +34,8 @@ export interface AgentOptions {
 	maxTurns: number;
 	contextWindow?: number;
 	maxTokens?: number;
+	/** The most output the model allows, used when a retry needs more room. */
+	modelMaxOutput?: number;
 	reasoningEffort?: string;
 	supportsTools?: boolean;
 	getMode(): PermissionMode;
@@ -63,13 +65,13 @@ export function toolSchemas() {
  * Replaces older messages with a model-written summary and keeps recent work
  * intact. Returns the messages it removed, or an empty list if nothing was old enough.
  */
-export async function compact(options: Pick<AgentOptions, 'client' | 'model' | 'messages' | 'signal'>, keepTokens = KEEP_TOKENS_AFTER_COMPACT): Promise<ChatMessage[]> {
+export async function compact(options: Pick<AgentOptions, 'client' | 'model' | 'messages' | 'signal' | 'maxTokens'>, keepTokens = KEEP_TOKENS_AFTER_COMPACT): Promise<ChatMessage[]> {
 	const { messages } = options;
 	const cut = compactionCut(messages, keepTokens);
 	if (cut === 0) { return []; }
 	let summary = '';
 	const request: ChatMessage[] = [{ role: 'user', content: `${COMPACT_PROMPT}\n\n<conversation>\n${flattenForSummary(messages.slice(0, cut))}\n</conversation>` }];
-	for await (const event of options.client.streamChat({ model: options.model, messages: request }, options.signal)) {
+	for await (const event of options.client.streamChat({ model: options.model, messages: request, maxTokens: options.maxTokens }, options.signal)) {
 		if (event.type === 'text') { summary += event.text; }
 	}
 	if (!summary.trim()) { throw new Error('The model returned an empty summary.'); }
@@ -98,6 +100,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 	let lastCompaction = -MIN_TURNS_BETWEEN_COMPACTIONS;
 	let recovered = false;
 	let emptyReplies = 0;
+	let maxTokens = options.maxTokens;
 
 	const summarize = async (turn: number, message: string): Promise<boolean> => {
 		onEvent({ type: 'notice', message });
@@ -128,7 +131,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 				// A second empty reply gets an explicit nudge, which is not saved to the chat.
 				messages: withCacheMarkers(options.systemPrompt, emptyReplies >= MAX_EMPTY_RETRIES ? [...outgoing, { role: 'user', content: CONTINUE_PROMPT }] : outgoing, options.model),
 				tools,
-				maxTokens: options.maxTokens,
+				maxTokens,
 				reasoningEffort: options.reasoningEffort,
 			}, signal);
 			for await (const event of stream) {
@@ -166,6 +169,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 		if (!text && calls.length === 0) {
 			if (emptyReplies < MAX_EMPTY_RETRIES) {
 				emptyReplies++;
+				if (finish === 'length' && maxTokens) { maxTokens = Math.min(maxTokens * 2, options.modelMaxOutput ?? maxTokens * 2); }
 				if (emptyReplies === 1) { onEvent({ type: 'notice', message: 'The model returned nothing, trying again.' }); }
 				turn--;
 				continue;

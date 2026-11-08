@@ -12,6 +12,9 @@
 	let renderQueued = false;
 	let reasoningEl;
 	let setupOpen = false;
+	let lastActivity = Date.now();
+	let awaitingApproval = false;
+	let statusTimer;
 	const tools = new Map();
 
 	function post(type, extra) {
@@ -120,7 +123,31 @@
 		}
 	}
 
+	function renderStatus() {
+		const status = $('status');
+		status.hidden = !state.busy;
+		if (!state.busy) { return; }
+		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
+		status.textContent = awaitingApproval ? 'Waiting for your approval' : seconds < 3 ? 'Working...' : 'Thinking... ' + seconds + 's';
+	}
+
+	function updateStatusTimer() {
+		if (state.busy && !statusTimer) {
+			lastActivity = Date.now();
+			statusTimer = setInterval(renderStatus, 1000);
+		} else if (!state.busy && statusTimer) {
+			clearInterval(statusTimer);
+			statusTimer = undefined;
+			awaitingApproval = false;
+		}
+		renderStatus();
+	}
+
 	function onEvent(event) {
+		lastActivity = Date.now();
+		if (event.type === 'permission') { awaitingApproval = true; }
+		if (event.type === 'toolEnd') { awaitingApproval = false; }
+		renderStatus();
 		switch (event.type) {
 			case 'user':
 				endAssistant();
@@ -206,6 +233,7 @@
 		if (!sessions.some(s => s.id === next.sessionId)) { sessions.unshift({ id: next.sessionId, title: 'New chat' }); }
 		fill($('sessions'), sessions.map(s => ({ value: s.id, label: s.title })), next.sessionId);
 
+		updateStatusTimer();
 		$('send').hidden = next.busy;
 		$('stop').hidden = !next.busy;
 		const credits = $('credits');

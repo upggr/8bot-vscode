@@ -5,6 +5,7 @@ export const DEFAULT_BASE_URL = 'https://api.8os.com';
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const AUTO_MODEL = 'auto';
+const DEFAULT_IDLE_TIMEOUT_MS = 600_000;
 const FAILOVER_MODEL = /deepseek/i;
 const MAX_RETRIES = 3;
 
@@ -61,6 +62,8 @@ export interface GatewayOptions {
 	agentId?: string;
 	/** Sent as X-Pax8-Feature so spend can be tracked per product surface. */
 	feature?: string;
+	/** How long a stream may stay completely silent before it counts as hung. */
+	idleTimeoutMs?: number;
 	/** Called for every completed request, whichever feature made it. */
 	onUsage?: (usage: Usage) => void;
 }
@@ -72,6 +75,7 @@ export class GatewayClient implements ChatStreamer {
 	private readonly sleep: (ms: number) => Promise<void>;
 	private readonly taskHint?: string;
 	private readonly agentId?: string;
+	private readonly idleTimeoutMs: number;
 	private readonly feature?: string;
 	private readonly onUsage?: (usage: Usage) => void;
 	/** Once automatic routing fails, later turns on this client skip straight to this model. */
@@ -84,6 +88,7 @@ export class GatewayClient implements ChatStreamer {
 		this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
 		this.taskHint = options.taskHint;
 		this.agentId = options.agentId;
+		this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
 		this.feature = options.feature;
 		this.onUsage = options.onUsage;
 	}
@@ -146,6 +151,29 @@ export class GatewayClient implements ChatStreamer {
 	}
 
 	async *streamChat(request: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+		// Thinking models can be silent for minutes, so only a very long silence counts as a hang.
+		const watchdog = new AbortController();
+		let timedOut = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const touch = () => {
+			clearTimeout(timer);
+			timer = setTimeout(() => { timedOut = true; watchdog.abort(); }, this.idleTimeoutMs);
+		};
+		const combined = signal ? AbortSignal.any([signal, watchdog.signal]) : watchdog.signal;
+		touch();
+		try {
+			yield* this.streamOnce(request, combined, touch);
+		} catch (error) {
+			if (timedOut) {
+				throw new GatewayError(`The gateway stopped responding for ${Math.round(this.idleTimeoutMs / 1000)} seconds. Send "continue" to try again.`);
+			}
+			throw error;
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	private async *streamOnce(request: ChatRequest, signal: AbortSignal, touch: () => void): AsyncGenerator<StreamEvent> {
 		const model = request.model === AUTO_MODEL && this.failoverModel ? this.failoverModel : request.model;
 		let response: Response;
 		try {
@@ -158,6 +186,7 @@ export class GatewayClient implements ChatStreamer {
 			yield { type: 'failover', model: fallback.id, name: fallback.name, contextWindow: fallback.contextWindow };
 			response = await this.postChat(request, fallback.id, signal);
 		}
+		touch();
 		if (!response.body) {
 			throw new GatewayError('The gateway returned an empty response.');
 		}
@@ -169,6 +198,7 @@ export class GatewayClient implements ChatStreamer {
 
 		const calls = new Map<number, ToolCall>();
 		for await (const data of readSse(response.body)) {
+			touch();
 			if (data === '[DONE]') { break; }
 			let chunk: GatewayChunk;
 			try {
@@ -351,7 +381,8 @@ export async function* readSse(stream: ReadableStream<Uint8Array>): AsyncGenerat
 			}
 		}
 	} finally {
-		await reader.cancel().catch(() => undefined);
+		// Not awaited: the gateway can end a stream with a malformed chunk, and cleanup must never block.
+		void reader.cancel().catch(() => undefined);
 	}
 }
 

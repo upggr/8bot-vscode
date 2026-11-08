@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } from '../core/agent';
-import { compactLimit, compactionCut, estimateTokens, keepTokensFor, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
+import { compactLimit, compactionCut, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
 import { addMemory, readMemory } from '../core/memory';
@@ -597,6 +597,45 @@ test('the empty reply allowance resets after a successful turn', async () => {
 		await runAgent(agentOptions(stream, root, 'default', 'allow', [], messages));
 		assert.equal(messages.at(-1)?.content, 'done');
 	} finally { clean(); }
+});
+
+test('output limits avoid the small gateway default without exceeding the model', () => {
+	assert.equal(outputTokenLimit('claude', 128_000, 0), 32_000);
+	assert.equal(outputTokenLimit('small', 8_000, undefined), 8_000);
+	assert.equal(outputTokenLimit('claude', 128_000, 500), 500);
+	assert.equal(outputTokenLimit('small', 8_000, 50_000), 8_000);
+	assert.equal(outputTokenLimit('auto', 128_000, 0), undefined);
+	assert.equal(outputTokenLimit('auto', 128_000, 700), 700);
+});
+
+test('a reply cut off with no output retries with more room, up to the model limit', async () => {
+	const { root, clean } = workspace();
+	try {
+		const sizes: (number | undefined)[] = [];
+		let calls = 0;
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				sizes.push(request.maxTokens);
+				calls++;
+				if (calls < 3) { yield { type: 'finish', reason: 'length' }; return; }
+				yield say('answer');
+			},
+		};
+		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', []), maxTokens: 1000, modelMaxOutput: 3000 });
+		assert.deepEqual(sizes, [1000, 2000, 3000]);
+	} finally { clean(); }
+});
+
+test('a silent stream is reported instead of hanging forever', async () => {
+	handler = (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write(': hello\n\n'); };
+	await assert.rejects(collect(client({ idleTimeoutMs: 60 }).streamChat({ model: 'm', messages: [] })), /stopped responding/);
+});
+
+test('stopping a request is not reported as a hang', async () => {
+	handler = (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write(': hello\n\n'); };
+	const abort = new AbortController();
+	setTimeout(() => abort.abort(), 40);
+	await assert.rejects(collect(client({ idleTimeoutMs: 5_000 }).streamChat({ model: 'm', messages: [] }, abort.signal)), (e: Error) => !/stopped responding/.test(e.message));
 });
 
 test('sessions persist and reject unsafe ids', async () => {

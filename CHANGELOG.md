@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Give models enough output room, which fixes empty replies on long chats.
+- Show live progress while a model is thinking.
+- Report a stream that stops responding instead of waiting forever.
+
 ## 0.1.3
 
 - Retry automatically when a model returns an empty reply.
