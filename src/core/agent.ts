@@ -48,6 +48,9 @@ export interface AgentOptions {
 
 const COMPACT_PROMPT = 'Summarize this conversation so work can continue from the summary alone. Include the user\'s goals and exact requests, decisions made, files changed, errors and how they were solved, the current state, and the next step. Output only the summary.';
 const MIN_TURNS_BETWEEN_COMPACTIONS = 3;
+/** Some models occasionally spend a whole turn on hidden thinking and return nothing. */
+const MAX_EMPTY_RETRIES = 2;
+const CONTINUE_PROMPT = 'Continue with the task. Use a tool or give your response now.';
 
 /** Models where marking the latest message for caching has been verified to work. */
 const CONVERSATION_CACHE_MODELS = /claude/i;
@@ -94,6 +97,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 	let calibration = 1;
 	let lastCompaction = -MIN_TURNS_BETWEEN_COMPACTIONS;
 	let recovered = false;
+	let emptyReplies = 0;
 
 	const summarize = async (turn: number, message: string): Promise<boolean> => {
 		onEvent({ type: 'notice', message });
@@ -121,7 +125,8 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 		try {
 			const stream = client.streamChat({
 				model: options.model,
-				messages: withCacheMarkers(options.systemPrompt, outgoing, options.model),
+				// A second empty reply gets an explicit nudge, which is not saved to the chat.
+				messages: withCacheMarkers(options.systemPrompt, emptyReplies >= MAX_EMPTY_RETRIES ? [...outgoing, { role: 'user', content: CONTINUE_PROMPT }] : outgoing, options.model),
 				tools,
 				maxTokens: options.maxTokens,
 				reasoningEffort: options.reasoningEffort,
@@ -159,9 +164,16 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 			return;
 		}
 		if (!text && calls.length === 0) {
-			onEvent({ type: 'notice', message: 'The model returned an empty response.' });
+			if (emptyReplies < MAX_EMPTY_RETRIES) {
+				emptyReplies++;
+				if (emptyReplies === 1) { onEvent({ type: 'notice', message: 'The model returned nothing, trying again.' }); }
+				turn--;
+				continue;
+			}
+			onEvent({ type: 'notice', message: `The model returned an empty response ${emptyReplies + 1} times (finish reason: ${finish || 'none'}). Send "continue" or try another model.` });
 			return;
 		}
+		emptyReplies = 0;
 		messages.push(calls.length ? { role: 'assistant', content: text || null, tool_calls: calls } : { role: 'assistant', content: text });
 
 		if (calls.length === 0) {

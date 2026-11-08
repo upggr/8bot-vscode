@@ -562,6 +562,43 @@ test('large files are readable', async () => {
 	} finally { clean(); }
 });
 
+test('an empty reply is retried, then nudged, without changing the saved chat', async () => {
+	const { root, clean } = workspace();
+	try {
+		const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+		const stream = scripted([[{ type: 'finish', reason: 'stop' }], [{ type: 'finish', reason: 'stop' }], [say('recovered')]]);
+		const events: AgentEvent[] = [];
+		await runAgent(agentOptions(stream, root, 'default', 'allow', events, messages));
+		assert.equal(stream.requests.length, 3);
+		assert.equal(stream.requests[1].at(-1)?.content, 'go');
+		assert.match(JSON.stringify(stream.requests[2].at(-1)?.content), /Continue with the task/);
+		assert.deepEqual(messages.map(m => m.content), ['go', 'recovered']);
+		assert.equal(events.filter(e => e.type === 'notice').length, 1);
+	} finally { clean(); }
+});
+
+test('repeated empty replies stop with a clear message and do not use up turns', async () => {
+	const { root, clean } = workspace();
+	try {
+		const events: AgentEvent[] = [];
+		const stream = scripted([[{ type: 'finish', reason: 'length' }], [{ type: 'finish', reason: 'length' }], [{ type: 'finish', reason: 'length' }]]);
+		await runAgent(agentOptions(stream, root, 'default', 'allow', events));
+		assert.equal(stream.requests.length, 3);
+		assert.ok(events.some(e => e.type === 'notice' && /3 times \(finish reason: length\)/.test(e.message)));
+	} finally { clean(); }
+});
+
+test('the empty reply allowance resets after a successful turn', async () => {
+	const { root, clean } = workspace();
+	try {
+		const empty: StreamEvent[] = [{ type: 'finish', reason: 'stop' }];
+		const stream = scripted([empty, empty, [call('1', 'list_files', {})], empty, empty, [say('done')]]);
+		const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+		await runAgent(agentOptions(stream, root, 'default', 'allow', [], messages));
+		assert.equal(messages.at(-1)?.content, 'done');
+	} finally { clean(); }
+});
+
 test('sessions persist and reject unsafe ids', async () => {
 	const { root, clean } = workspace();
 	try {

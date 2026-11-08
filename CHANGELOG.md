@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Retry automatically when a model returns an empty reply.
+
 ## 0.1.2
 
 - Move 8bot to a tab in the right sidebar, next to Chat.
