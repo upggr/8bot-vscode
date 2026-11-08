@@ -5,6 +5,7 @@
 <p align="center"><strong>An AI coding agent and chat for Visual Studio Code, powered by your 8os Agent Gateway and API key.</strong></p>
 
 <p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=IoannisKokkinis.8bot-vscode"><strong>Install from the VS Code Marketplace</strong></a> ·
   <a href="https://upggr.github.io/8bot-vscode/getting-started.html">Get started</a> ·
   <a href="https://upggr.github.io/8bot-vscode/">Documentation</a> ·
   <a href="https://buy-it.gr/8os">Get an 8os subscription</a> ·
@@ -34,7 +35,7 @@ It works in its own sidebar, as **`@8bot` in the VS Code Chat window**, and as a
 
 ## Quick start
 
-1. [Download the latest `.vsix`](https://github.com/upggr/8bot-vscode/releases/latest), then in VS Code open **Extensions**, select the **...** menu and choose **Install from VSIX**.
+1. [Install 8bot from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=IoannisKokkinis.8bot-vscode), or search for **8bot** in the VS Code Extensions view.
 2. Open the **8bot** icon in the Activity Bar.
 3. **Did your provider already give you a gateway and API key?** Enter them on the setup screen. The default gateway is `https://api.8os.com`.
 4. **No gateway or key yet?** [Get an 8os subscription from BUY IT](https://buy-it.gr/8os).
@@ -91,7 +92,7 @@ code --install-extension 8bot-vscode-*.vsix
 
 ## FAQ
 
-**Is there an official 8bot or 8os extension for VS Code?** At the time of writing, none is listed on the VS Code Marketplace or Open VSX. This is an independent, open source extension.
+**Is there an official 8bot or 8os extension for VS Code?** Not from Pax8 at the time of writing. This is an independent, open source extension, [available on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=IoannisKokkinis.8bot-vscode).
 
 **Does it need GitHub Copilot?** The sidebar works without it. VS Code's own Chat window features depend on what your VS Code installation has enabled.
 

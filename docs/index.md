@@ -7,7 +7,7 @@ description: Use your Pax8 8os Agent Gateway and API key in Visual Studio Code. 
 
 *Independent project. Not affiliated with or endorsed by Pax8.*
 
-[Get the code on GitHub](https://github.com/upggr/8bot-vscode) · [Get an 8os subscription](https://buy-it.gr/8os)
+**[Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=IoannisKokkinis.8bot-vscode)** · [Get the code on GitHub](https://github.com/upggr/8bot-vscode) · [Get an 8os subscription](https://buy-it.gr/8os)
 
 ## What you can do
 

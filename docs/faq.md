@@ -8,7 +8,7 @@ description: Answers about using 8bot and the Pax8 8os gateway in VS Code, API k
 ## Questions
 
 **Is there an official 8bot or 8os plugin for VS Code?**
-At the time of writing, none is listed on the VS Code Marketplace or Open VSX. This extension is independent and is not affiliated with Pax8.
+Not from Pax8 at the time of writing. This extension is independent and is not affiliated with Pax8. It is [available on the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=IoannisKokkinis.8bot-vscode).
 
 **Where do I get an 8os API key?**
 From your provider, or from [BUY IT](https://buy-it.gr/8os).
