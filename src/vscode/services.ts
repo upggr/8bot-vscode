@@ -1,12 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { addSpend, BUY_URL, creditStatus, CreditStatus, SpendRecord } from '../core/credits';
 import { DEFAULT_BASE_URL, GatewayClient, GatewayError, LiveLimit, normalizeBaseUrl } from '../core/gateway';
+import { defaultKeyLabel, maskKey, StoredKey } from '../core/keyring';
 import { addMemory, readMemory } from '../core/memory';
 import { isPermissionMode, PERMISSION_MODES, PermissionMode } from '../core/permissions';
 import { ModelInfo } from '../core/types';
 
 const API_KEY_SECRET = 'eightbot.apiKey';
+/** JSON list of every saved key, so the user can switch between gateways and accounts. */
+const KEYRING_SECRET = 'eightbot.keyring';
 const PAX8_TOKEN_SECRET = 'eightbot.pax8Token';
 const MODEL_STATE = 'eightbot.model';
 const SPEND_STATE = 'eightbot.spend';
@@ -131,15 +135,20 @@ export class Services implements vscode.Disposable {
 	}
 
 	/** Validates and stores a gateway and key. Returns an error message, or undefined on success. */
-	async saveConnection(gateway: string, key: string): Promise<string | undefined> {
+	async saveConnection(gateway: string, key: string, label?: string): Promise<string | undefined> {
 		try {
 			const baseUrl = normalizeBaseUrl(gateway || DEFAULT_BASE_URL);
 			if (!key.trim()) { return 'Enter your API key.'; }
-			await this.buildClient(key.trim(), 'sidebar', baseUrl).listModels();
+			const trimmed = key.trim();
+			await this.buildClient(trimmed, 'sidebar', baseUrl).listModels();
 			if (baseUrl !== normalizeBaseUrl(this.baseUrl)) {
 				await this.config.update('baseUrl', baseUrl, vscode.ConfigurationTarget.Global);
 			}
-			await this.context.secrets.store(API_KEY_SECRET, key.trim());
+			await this.context.secrets.store(API_KEY_SECRET, trimmed);
+			const ring = await this.keyring();
+			const existing = ring.find(k => k.key === trimmed);
+			const entry: StoredKey = { id: existing?.id ?? randomUUID(), label: label?.trim() || existing?.label || defaultKeyLabel(trimmed), gateway: baseUrl, key: trimmed };
+			await this.storeKeyring([...ring.filter(k => k.key !== trimmed), entry]);
 			return undefined;
 		} catch (error) {
 			return (error as Error).message;
@@ -148,6 +157,64 @@ export class Services implements vscode.Disposable {
 
 	async clearApiKey(): Promise<void> {
 		await this.context.secrets.delete(API_KEY_SECRET);
+	}
+
+	async keyring(): Promise<StoredKey[]> {
+		try {
+			return JSON.parse(await this.context.secrets.get(KEYRING_SECRET) ?? '[]') as StoredKey[];
+		} catch {
+			return [];
+		}
+	}
+
+	private async storeKeyring(keys: StoredKey[]): Promise<void> {
+		await this.context.secrets.store(KEYRING_SECRET, JSON.stringify(keys));
+	}
+
+	/** The key currently in use, masked for display. */
+	async activeKeyLabel(): Promise<string | undefined> {
+		const active = await this.context.secrets.get(API_KEY_SECRET);
+		if (!active) { return undefined; }
+		const entry = (await this.keyring()).find(k => k.key === active);
+		return entry ? `${entry.label} (${maskKey(active)})` : maskKey(active);
+	}
+
+	/** Switch between saved keys, add a new one, or forget a saved one. */
+	async pickApiKey(): Promise<void> {
+		const active = await this.context.secrets.get(API_KEY_SECRET);
+		const ring = await this.keyring();
+		const add = '$(add) Add a new gateway and key…';
+		const items = ring.map(k => ({
+			label: `${k.key === active ? '$(check) ' : ''}${k.label}`,
+			description: `${maskKey(k.key)} · ${k.gateway}`,
+			detail: k.key === active ? 'Currently in use' : undefined,
+			key: k,
+		}));
+		const picked = await vscode.window.showQuickPick([...items, { label: add, description: '', detail: undefined, key: undefined }], {
+			title: '8bot API Keys',
+			placeHolder: active ? `Using ${await this.activeKeyLabel()}` : 'No key stored yet',
+		});
+		if (!picked) { return; }
+		if (!picked.key) {
+			await vscode.commands.executeCommand('eightbot.setApiKey');
+			return;
+		}
+		if (picked.key.key === active) { return; }
+		const chosen = picked.key;
+		const actions = await vscode.window.showQuickPick(
+			[{ label: '$(arrow-swap) Switch to this key', action: 'switch' }, { label: '$(trash) Forget this key', action: 'forget' }],
+			{ title: `${chosen.label} (${maskKey(chosen.key)})` },
+		);
+		if (actions?.action === 'switch') {
+			if (chosen.gateway !== normalizeBaseUrl(this.baseUrl)) {
+				await this.config.update('baseUrl', chosen.gateway, vscode.ConfigurationTarget.Global);
+			}
+			await this.context.secrets.store(API_KEY_SECRET, chosen.key);
+			void vscode.window.showInformationMessage(`8bot now uses ${chosen.label} (${maskKey(chosen.key)}).`);
+		} else if (actions?.action === 'forget') {
+			await this.storeKeyring(ring.filter(k => k.key !== chosen.key));
+			void vscode.window.showInformationMessage(`Forgot ${chosen.label}. ${chosen.key === active ? 'The active key was left untouched.' : ''}`);
+		}
 	}
 
 	async connectPax8(): Promise<void> {

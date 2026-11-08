@@ -2,7 +2,7 @@
   "name": "8bot-vscode",
   "displayName": "8bot: AI Coding Agent for the 8os Gateway (Unofficial)",
   "description": "Unofficial AI coding agent and chat for VS Code using your Pax8 8os Agent Gateway API key: sidebar chat, @8bot in VS Code Chat, model selection, file edits, terminal commands and permission modes.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "publisher": "IoannisKokkinis",
   "author": {
     "name": "Ioannis Kokkinis",
@@ -132,6 +132,12 @@
         "command": "eightbot.clearApiKey",
         "title": "Remove API Key",
         "category": "8bot"
+      },
+      {
+        "command": "eightbot.switchApiKey",
+        "title": "Switch API Key",
+        "category": "8bot",
+        "icon": "$(key)"
       },
       {
         "command": "eightbot.selectModel",

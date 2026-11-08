@@ -8,7 +8,7 @@ const media = path.join(__dirname, '..', '..', 'media');
 const { render } = require(path.join(media, 'markdown.js')) as { render(text: string): string };
 
 const BODY = `
-<section id="welcome" hidden><input id="gateway"><input id="apiKey"><p id="setupError" hidden></p><button id="saveConnection"></button><button id="getSubscription"></button><button id="closeSetup" hidden></button></section>
+<section id="welcome" hidden><input id="gateway"><input id="apiKey"><input id="keyLabel"><p id="setupError" hidden></p><button id="saveConnection"></button><button id="getSubscription"></button><button id="closeSetup" hidden></button></section>
 <main id="app" hidden>
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
@@ -63,8 +63,9 @@ test('a user with no key sees the welcome screen and can reach the subscription 
 	assert.equal(posted.at(-1)?.type, 'buy');
 	assert.equal($('gateway').value, 'https://api.8os.com');
 	$('apiKey').value = 'sk-pax8-abc';
+	$('keyLabel').value = 'Work';
 	$('saveConnection').click();
-	assert.deepEqual(posted.at(-1), { type: 'saveConnection', gateway: 'https://api.8os.com', key: 'sk-pax8-abc' });
+	assert.deepEqual(posted.at(-1), { type: 'saveConnection', gateway: 'https://api.8os.com', key: 'sk-pax8-abc', label: 'Work' });
 	send({ type: 'setupResult', error: 'rejected' });
 	assert.equal($('setupError').textContent, 'rejected');
 	assert.equal($('setupError').hidden, false);

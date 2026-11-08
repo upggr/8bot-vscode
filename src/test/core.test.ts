@@ -17,6 +17,7 @@ import { buildSystemPrompt } from '../core/prompt';
 import { newSession, SessionStore } from '../core/sessions';
 import { findTool, globToRegExp, isSensitivePath, ToolContext } from '../core/tools';
 import { ChatMessage, ChatStreamer, ContentPart, StreamEvent, ToolCall } from '../core/types';
+import { defaultKeyLabel, maskKey } from '../core/keyring';
 
 const KEY = 'sk-pax8-testkey';
 
@@ -530,6 +531,12 @@ test('truncateAttachmentText caps long text and flags it', () => {
 	assert.deepEqual(truncateAttachmentText('short'), { text: 'short', truncated: false });
 	const long = truncateAttachmentText('x'.repeat(10), 4);
 	assert.deepEqual(long, { text: 'xxxx', truncated: true });
+});
+
+test('key masking shows just enough to tell keys apart', () => {
+	assert.equal(maskKey('sk-pax8-1b8260744efa9a734dae8c78aada785d'), 'sk-pax8-…785d');
+	assert.equal(maskKey('short'), '••••');
+	assert.equal(defaultKeyLabel('sk-pax8-209d7b92e43c4a8ea77964fd0e6d3d28'), 'sk-pax8-…3d28');
 });
 
 test('a session exports as Markdown with tool calls, hiding editor context and attachments', () => {

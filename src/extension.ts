@@ -20,6 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('eightbot.newChat', () => chatView.startNew()),
 		vscode.commands.registerCommand('eightbot.setApiKey', () => chatView.showSetup()),
 		vscode.commands.registerCommand('eightbot.clearApiKey', () => services.clearApiKey()),
+		vscode.commands.registerCommand('eightbot.switchApiKey', () => services.pickApiKey()),
 		vscode.commands.registerCommand('eightbot.selectModel', () => services.pickModel()),
 		vscode.commands.registerCommand('eightbot.setPermissionMode', () => services.pickMode()),
 		vscode.commands.registerCommand('eightbot.askAboutSelection', () => chatView.askAboutSelection()),

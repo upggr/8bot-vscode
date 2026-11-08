@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.10
+
+- Switch between saved API keys: **8bot: Switch API Key** lists every saved key with a friendly name, masked key and gateway, and switches or forgets them. The setup screen can name a key when you add it. Keys stay in VS Code secret storage.
+
 ## 0.1.9
 
 - Export the chat as Markdown from the view menu or **8bot: Export Chat as Markdown**, with tool calls and results included.

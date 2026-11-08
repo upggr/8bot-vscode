@@ -430,7 +430,7 @@
 	function saveConnection() {
 		$('setupError').hidden = true;
 		$('saveConnection').disabled = true;
-		post('saveConnection', { gateway: $('gateway').value.trim(), key: $('apiKey').value.trim() });
+		post('saveConnection', { gateway: $('gateway').value.trim(), key: $('apiKey').value.trim(), label: ($('keyLabel') ? $('keyLabel').value : '').trim() });
 	}
 
 	function send() {

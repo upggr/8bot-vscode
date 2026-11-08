@@ -40,6 +40,7 @@ interface WebviewMessage {
 	answer?: PermissionAnswer;
 	gateway?: string;
 	key?: string;
+	label?: string;
 	attachments?: Attachment[];
 }
 
@@ -197,7 +198,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				await this.openDiff(message.id ?? '');
 				break;
 			case 'saveConnection':
-				this.post({ type: 'setupResult', error: await this.services.saveConnection(message.gateway ?? '', message.key ?? '') });
+				this.post({ type: 'setupResult', error: await this.services.saveConnection(message.gateway ?? '', message.key ?? '', message.label) });
 				break;
 			case 'buy':
 				await this.services.openSubscriptionPage();
@@ -527,6 +528,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	<input id="gateway" type="url" spellcheck="false" autocomplete="off">
 	<label for="apiKey">API key</label>
 	<input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-pax8-...">
+	<label for="keyLabel">Name for this key <span class="muted">(optional, so you can switch keys later)</span></label>
+	<input id="keyLabel" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. Work, Personal">
 	<p id="setupError" class="error-text" role="alert" hidden></p>
 	<button id="saveConnection" type="button">Connect</button>
 	<hr>
