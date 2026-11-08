@@ -22,11 +22,11 @@ export class GatewayModelProvider implements vscode.LanguageModelChatProvider {
 			const models = await this.services.models();
 			return models.map(m => ({
 				id: m.id,
-				name: m.name,
+				name: m.deprecatedAt ? `${m.name} (deprecated)` : m.name,
 				family: m.family,
 				version: '1',
 				detail: '8os',
-				tooltip: m.description,
+				tooltip: m.deprecatedAt ? `Deprecated by the provider. ${m.description ?? ''}`.trim() : m.description,
 				maxInputTokens: m.contextWindow,
 				maxOutputTokens: m.maxOutputTokens,
 				capabilities: { toolCalling: m.supportsTools, imageInput: m.supportsImages },
@@ -53,12 +53,16 @@ export class GatewayModelProvider implements vscode.LanguageModelChatProvider {
 				type: 'function',
 				function: { name: tool.name, description: tool.description, parameters: tool.inputSchema ?? { type: 'object', properties: {} } },
 			}));
+			// The same reasoning effort the sidebar and @8bot use, so native Chat agent mode matches.
+			const info = await this.services.modelInfo(model.id);
+			const effort = this.services.config.get<string>('reasoningEffort', '');
 			const stream = client.streamChat({
 				model: model.id,
 				messages: toGatewayMessages(messages),
 				tools,
 				toolChoice: options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto',
 				maxTokens: outputTokenLimit(model.id, model.maxOutputTokens, this.services.config.get<number>('maxOutputTokens')),
+				reasoningEffort: effort && info?.reasoningEfforts.includes(effort) ? effort : undefined,
 			}, abort.signal);
 			for await (const event of stream) {
 				if (event.type === 'text') {
@@ -73,8 +77,15 @@ export class GatewayModelProvider implements vscode.LanguageModelChatProvider {
 	}
 
 	async provideTokenCount(_model: vscode.LanguageModelChatInformation, text: string | vscode.LanguageModelChatRequestMessage): Promise<number> {
-		const content = typeof text === 'string' ? text : JSON.stringify(text.content);
-		return Math.ceil(content.length / 4);
+		if (typeof text === 'string') { return Math.ceil(text.length / 4); }
+		let chars = 0;
+		for (const part of text.content) {
+			if (part instanceof vscode.LanguageModelTextPart) { chars += part.value.length; }
+			else if (part instanceof vscode.LanguageModelToolCallPart) { chars += part.name.length + JSON.stringify(part.input ?? {}).length; }
+			else if (part instanceof vscode.LanguageModelDataPart) { chars += part.data.byteLength; }
+			else { chars += JSON.stringify(part).length; }
+		}
+		return Math.ceil(chars / 4);
 	}
 }
 

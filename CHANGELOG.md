@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Deeper native VS Code Chat integration: the configured reasoning effort now applies to 8os models used by VS Code's own Chat agent mode, deprecated models are marked in VS Code's model picker, and token counting covers tool calls and images so context warnings are accurate.
+
 ## 0.1.6
 
 - Message queue: type while 8bot is working and your message waits in a visible queue and runs next, instead of being lost. Queued messages can be removed, and Stop clears the queue.
