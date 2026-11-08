@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 
-const EXTENSION_ID = 'upggr.8bot-vscode';
+const EXTENSION_ID = 'IoannisKokkinis.8bot-vscode';
 const CHEAP_MODEL = 'nova-micro-v1';
 
 async function step(name: string, body: () => Promise<void>): Promise<void> {
