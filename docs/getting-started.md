@@ -13,7 +13,9 @@ description: Install 8bot for VS Code and connect your 8os gateway and API key, 
 
 ## Install
 
-Build the extension from source until a Marketplace release is available:
+[Download the latest `.vsix`](https://github.com/upggr/8bot-vscode/releases/latest). In VS Code, open **Extensions**, select the **...** menu and choose **Install from VSIX**.
+
+Or build it from source:
 
 ```bash
 git clone https://github.com/upggr/8bot-vscode.git

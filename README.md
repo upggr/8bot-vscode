@@ -33,7 +33,7 @@ It works in its own sidebar, as **`@8bot` in the VS Code Chat window**, and as a
 
 ## Quick start
 
-1. Install 8bot for VS Code ([build it from source](#install-from-source) until a Marketplace release is published).
+1. [Download the latest `.vsix`](https://github.com/upggr/8bot-vscode/releases/latest), then in VS Code open **Extensions**, select the **...** menu and choose **Install from VSIX**.
 2. Open the **8bot** icon in the Activity Bar.
 3. **Did your provider already give you a gateway and API key?** Enter them on the setup screen. The default gateway is `https://api.8os.com`.
 4. **No gateway or key yet?** [Get an 8os subscription from BUY IT](https://buy-it.gr/8os).
