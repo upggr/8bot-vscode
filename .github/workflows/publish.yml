@@ -4,7 +4,7 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   id-token: write
 jobs:
   publish:
@@ -20,3 +20,16 @@ jobs:
       - run: npm test
       # The Marketplace refuses a version twice, so this publishes only after a version bump.
       - run: npx vsce publish --oidc --skip-duplicate
+      # Attach the .vsix to a GitHub Release. Skipped silently when the version did not change.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if git rev-parse "v$VERSION" >/dev/null 2>&1 || gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists, skipping."
+            exit 0
+          fi
+          npx vsce package -o "8bot-vscode-$VERSION.vsix"
+          NOTES=$(awk '/^## '"$VERSION"'$/{found=1; next} found && /^## /{exit} found' CHANGELOG.md | sed '/^$/d')
+          gh release create "v$VERSION" "8bot-vscode-$VERSION.vsix" --title "8bot for VS Code $VERSION" --notes "$NOTES"
