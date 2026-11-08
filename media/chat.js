@@ -11,6 +11,9 @@
 	let assistantText = '';
 	let renderQueued = false;
 	let reasoningEl;
+	let liveChars = 0;
+	/** Learned $ per token per model, from completed requests this session. Used for live cost hints only. */
+	const costRates = new Map();
 	let setupOpen = false;
 	let lastActivity = Date.now();
 	let awaitingApproval = false;
@@ -137,7 +140,12 @@
 		if (!state.busy) { return; }
 		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
 		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
-		status.textContent = (awaitingApproval ? 'Waiting for your approval' : seconds < 3 ? 'Working...' : 'Thinking... ' + seconds + 's') + queued;
+		const base = awaitingApproval ? 'Waiting for your approval' : liveChars ? 'Thinking... ' + seconds + 's' : seconds < 3 ? 'Working...' : 'Thinking... ' + seconds + 's';
+		const liveTokens = Math.ceil(liveChars / 4);
+		const rate = costRates.get(state.liveModel || state.model);
+		const estimate = liveChars && rate ? ' (~$' + (liveTokens * rate).toFixed(6) + ')' : '';
+		const live = liveChars ? ' · ~' + liveTokens.toLocaleString() + ' tokens out' + estimate : '';
+		status.textContent = base + live + queued;
 	}
 
 	function updateStatusTimer() {
@@ -160,6 +168,7 @@
 		switch (event.type) {
 			case 'user': {
 				endAssistant();
+				liveChars = 0;
 				const box = add(element('div', 'message user', event.text));
 				(event.attachments || []).forEach(a => {
 					box.appendChild(element('span', 'chip', (a.isImage ? '🖼 ' : '📄 ') + a.name));
@@ -167,15 +176,18 @@
 				break;
 			}
 			case 'text':
+				liveChars += event.text.length;
 				appendAssistant(event.text);
 				break;
 			case 'reasoning':
+				liveChars += event.text.length;
 				if (!reasoningEl) {
 					const box = add(element('details', 'reasoning'));
 					box.appendChild(element('summary', '', 'Thinking'));
 					reasoningEl = box.appendChild(element('div', 'output'));
 				}
 				reasoningEl.textContent += event.text;
+				reasoningEl.parentElement.querySelector('summary').textContent = 'Thinking · ~' + Math.ceil(liveChars / 4).toLocaleString() + ' tokens';
 				break;
 			case 'toolStart': {
 				endAssistant();
@@ -191,10 +203,14 @@
 				if (card) { finishTool(card, event.ok, event.output); }
 				break;
 			}
-			case 'usage':
+			case 'usage': {
 				if (event.usage.model && state.model === 'auto') { $('model').title = 'Routed to ' + event.usage.model; }
+				if (event.usage.model) { state.liveModel = event.usage.model; }
+				const total = (event.usage.promptTokens || 0) + (event.usage.completionTokens || 0);
+				if (event.usage.cost && total > 0) { costRates.set(event.usage.model || state.model, event.usage.cost / total); }
 				showContext(event.usage);
 				break;
+			}
 			case 'notice':
 				endAssistant();
 				add(element('div', 'message notice', event.message));
@@ -215,6 +231,8 @@
 			default:
 				break;
 		}
+		// Render again after the switch: text and reasoning events grow the live token count.
+		renderStatus();
 	}
 
 	function isImage(file) {

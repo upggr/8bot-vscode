@@ -131,6 +131,18 @@ test('a busy chat shows live progress and approval waits', () => {
 	dom.window.close();
 });
 
+test('a busy chat shows a live token estimate while the model streams', () => {
+	const { send, $, dom } = load();
+	send({ ...STATE, busy: true });
+	send({ type: 'event', event: { type: 'reasoning', text: 'x'.repeat(400) } });
+	assert.match($('status').textContent ?? '', /~100 tokens out/);
+	send({ type: 'event', event: { type: 'usage', usage: { promptTokens: 1000, completionTokens: 1000, cost: 0.002, model: 'a' } } });
+	send({ type: 'event', event: { type: 'text', text: 'y'.repeat(400) } });
+	assert.match($('status').textContent ?? '', /~\$0\.000200/);
+	send({ ...STATE, busy: false });
+	dom.window.close();
+});
+
 test('messages typed while busy are queued and can be removed', () => {
 	const { posted, send, $, win, dom } = load();
 	send({ ...STATE, busy: true });
