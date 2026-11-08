@@ -1,15 +1,13 @@
 # Changelog
 
-## Unreleased
-
-- Show richer per-request usage on the context meter: reasoning tokens, tokens written to the prompt cache, and exact request cost.
-- Flag deprecated models in the model picker, from the gateway's deprecation info.
-- New `eightbot.planModel` setting: use a different (for example cheaper) model automatically while in plan mode.
-
 ## 0.1.5
 
 - Attach files, images and screenshots to the sidebar chat by dragging, pasting or picking them.
 - Fix empty replies repeating forever on the `auto` model: a reply cut off with no text now gets real output room on retry instead of only on models with an explicit limit.
+- Send images on `auto` routing and known vision-capable models; the gateway catalog wrongly marks every model as text-only.
+- Show richer per-request usage on the context meter: reasoning tokens, tokens written to the prompt cache, and exact request cost.
+- Flag deprecated models in the model picker, from the gateway's deprecation info.
+- New `eightbot.planModel` setting: use a different (for example cheaper) model automatically while in plan mode.
 
 ## 0.1.4
 
