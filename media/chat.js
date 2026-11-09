@@ -152,6 +152,14 @@
 		if (assistantEl) { assistantEl.innerHTML = render(assistantText); }
 		assistantEl = undefined;
 		assistantText = '';
+		if (reasoningEl) {
+			const box = reasoningEl.closest('details');
+			if (box) {
+				box.open = false;
+				const tokens = Math.ceil(reasoningEl.textContent.length / 4).toLocaleString();
+				box.querySelector('summary').textContent = 'Thought for ~' + tokens + ' tokens';
+			}
+		}
 		reasoningEl = undefined;
 	}
 
@@ -233,7 +241,10 @@
 		if (!state.busy) { return; }
 		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
 		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
-		const base = awaitingApproval ? 'Waiting for your approval' : liveChars ? 'Thinking... ' + seconds + 's' : seconds < 3 ? 'Working...' : 'Thinking... ' + seconds + 's';
+		let base;
+		if (awaitingApproval) { base = 'Waiting for your approval'; }
+		else if (liveChars) { base = seconds > 2 ? 'Working… ' + seconds + 's quiet' : 'Working…'; }
+		else { base = seconds < 3 ? 'Working…' : seconds < 30 ? 'Waiting for the model… ' + seconds + 's' : 'Still waiting for the model (' + seconds + 's) — press Stop if it seems stuck'; }
 		const liveTokens = Math.ceil(liveChars / 4);
 		const rate = costRates.get(state.liveModel || state.model);
 		const estimate = liveChars && rate ? ' (~$' + (liveTokens * rate).toFixed(6) + ')' : '';
@@ -284,11 +295,11 @@
 				liveChars += event.text.length;
 				if (!reasoningEl) {
 					const box = add(element('details', 'reasoning'));
-					box.appendChild(element('summary', '', 'Thinking'));
+					box.appendChild(element('summary', '', 'Thinking…'));
 					reasoningEl = box.appendChild(element('div', 'output'));
 				}
 				reasoningEl.textContent += event.text;
-				reasoningEl.parentElement.querySelector('summary').textContent = 'Thinking · ~' + Math.ceil(liveChars / 4).toLocaleString() + ' tokens';
+				reasoningEl.parentElement.querySelector('summary').textContent = 'Thinking… ~' + Math.ceil(liveChars / 4).toLocaleString() + ' tokens';
 				break;
 			case 'toolStart': {
 				endAssistant();
@@ -452,7 +463,6 @@
 		const models = next.models.length ? next.models : [{ id: next.model, name: next.model, efforts: [] }];
 		const selected = models.find(m => m.id === next.model);
 		$('modelName').textContent = (selected && selected.deprecated ? '⚠ ' : '') + (selected ? selected.name : next.model);
-		$('modelDetail').textContent = [selected && selected.contextWindow ? Math.round(selected.contextWindow / 1000) + 'k context' : '', selected && selected.efforts.length ? 'Reasoning' : '', 'Search models'].filter(Boolean).join(' · ');
 		$('model').title = 'Choose model · ' + next.model;
 		$('model').setAttribute('aria-label', 'Choose model: ' + (selected ? selected.name : next.model));
 		$('includeSelection').checked = next.includeSelection !== false;
@@ -460,10 +470,20 @@
 		$('mode').classList.toggle('danger', next.mode === 'bypassPermissions');
 		drawKeys(next.keys || [], next.keyStatus);
 
+		// Quiet badges on the collapsed Options row, so non-default choices are visible without the clutter.
+		const activeMode = next.modes.find(m => m.id === next.mode);
+		const modeBadge = $('modeBadge');
+		modeBadge.textContent = activeMode ? (activeMode.short || activeMode.label) : '';
+		modeBadge.hidden = next.mode === 'default';
+		modeBadge.className = 'chip' + (next.mode === 'bypassPermissions' ? ' danger' : next.mode !== 'default' ? ' warn' : '');
+
 		const current = models.find(m => m.id === next.model);
 		const efforts = current ? current.efforts : [];
-		$('effort').hidden = efforts.length === 0;
+		$('effortWrap').hidden = efforts.length === 0;
 		fillToggle($('effort'), [{ value: '', label: 'Default', title: 'Default reasoning effort' }].concat(efforts.map(e => ({ value: e, label: e, title: 'Reasoning effort: ' + e }))), efforts.includes(next.effort) ? next.effort : '');
+		const effortBadge = $('effortBadge');
+		effortBadge.textContent = next.effort || '';
+		effortBadge.hidden = !next.effort;
 
 		const sessions = next.sessions.slice();
 		if (!sessions.some(s => s.id === next.sessionId)) { sessions.unshift({ id: next.sessionId, title: 'New chat' }); }
@@ -484,10 +504,14 @@
 			chip.appendChild(remove);
 			queueBar.appendChild(chip);
 		});
-		const credits = $('credits');
-		credits.textContent = next.credits.label;
-		credits.title = next.credits.detail;
-		credits.className = 'link ' + next.credits.level;
+		const creditsChip = $('credits');
+		creditsChip.textContent = next.credits.label;
+		creditsChip.className = 'chip credits-chip ' + next.credits.level;
+		creditsChip.title = next.credits.detail;
+		const creditsDetail = $('creditsDetail');
+		creditsDetail.textContent = next.credits.label;
+		creditsDetail.title = next.credits.detail;
+		creditsDetail.className = 'link ' + next.credits.level;
 		$('selectionChip').hidden = !next.selection;
 		if (next.selection) { $('selectionText').textContent = next.selection.file + ':' + next.selection.lines; }
 		showContext(next.promptTokens);
@@ -551,7 +575,8 @@
 	$('apiKey').addEventListener('keydown', event => { if (event.key === 'Enter') { saveConnection(); } });
 	$('closeSetup').addEventListener('click', () => { setupOpen = false; showSetup(false); });
 	$('getSubscription').addEventListener('click', () => post('buy'));
-	$('credits').addEventListener('click', () => post('credits'));
+	$('credits').addEventListener('click', () => { $('advanced').open = true; post('credits'); });
+	$('creditsDetail').addEventListener('click', () => post('credits'));
 	$('model').addEventListener('click', () => post('pickModel'));
 	$('includeSelection').addEventListener('change', e => post('setIncludeSelection', { value: String(e.target.checked) }));
 	onToggle($('effort'), 'setEffort');
@@ -639,4 +664,7 @@
 	});
 
 	post('ready');
+	// After a VS Code reload the webview can be re-created without new state arriving; ask again
+	// whenever the panel becomes visible so it never sits empty and looks stuck.
+	document.addEventListener('visibilitychange', () => { if (!document.hidden) { post('ready'); } });
 })();

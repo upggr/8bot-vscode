@@ -124,6 +124,7 @@ export class Services implements vscode.Disposable {
 			taskHint: this.config.get<string>('taskHint') || undefined,
 			agentId: this.config.get<string>('agentId') || undefined,
 			feature,
+			idleTimeoutMs: this.config.get<number>('streamIdleTimeoutSeconds', 90) * 1000,
 			onUsage: usage => { if (usage.cost) { void this.recordCost(usage.cost); } },
 		});
 	}

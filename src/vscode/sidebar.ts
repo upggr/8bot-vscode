@@ -567,23 +567,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	</header>
 	<div id="transcript" role="log" aria-live="polite"></div>
 	<footer>
-		<label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked> <span id="selectionText"></span></label>
+		<div class="composer">
+			<label id="selectionChip" class="chip attach-chip" hidden><span class="at" aria-hidden="true">@</span><input id="includeSelection" type="checkbox" checked aria-label="Include the editor selection"><span id="selectionText"></span></label>
+			<div id="attachments" class="row" hidden></div>
+			<textarea id="input" rows="3" placeholder="Ask anything… drop or paste files, or type / for commands" aria-label="Message"></textarea>
+			<input id="fileInput" type="file" multiple hidden>
+			<div class="row composer-actions">
+				<button id="attach" class="icon ghost" type="button" title="Attach files" aria-label="Attach files">📎</button>
+				<button id="dictate" class="icon ghost" type="button" title="Dictate a message" aria-label="Dictate a message" hidden>🎤</button>
+				<button id="model" class="chip model-chip" type="button" aria-label="Choose model" title="Search models"><span class="model-symbol" aria-hidden="true">✦</span><span id="modelName">Choose model</span><span aria-hidden="true" class="chev">▾</span></button>
+				<span class="spacer"></span>
+				<button id="send" class="icon send" type="button" title="Send" aria-label="Send">➤</button>
+				<button id="stop" class="icon ghost" type="button" title="Stop" aria-label="Stop" hidden>■</button>
+			</div>
+		</div>
 		<div id="status" class="muted" role="status" hidden></div>
 		<div id="queue" hidden></div>
-		<div id="attachments" class="row" hidden></div>
-		<textarea id="input" rows="3" placeholder="Ask 8bot to build, fix or explain. Drop or paste a file or screenshot, or type / for commands." aria-label="Message"></textarea>
-		<input id="fileInput" type="file" multiple hidden>
-		<div class="row">
-			<button id="attach" class="icon secondary" type="button" title="Attach files" aria-label="Attach files">📎</button>
-			<button id="dictate" class="icon secondary" type="button" title="Dictate a message" aria-label="Dictate a message" hidden>🎤</button>
-			<button id="model" type="button" aria-label="Choose model" title="Search models"><span class="model-symbol" aria-hidden="true">✦</span><span class="model-copy"><span id="modelName">Choose model</span><small id="modelDetail">Search models</small></span><span aria-hidden="true">⌕</span></button>
-			<button id="send" type="button">Send</button>
-			<button id="stop" class="secondary" type="button" hidden>Stop</button>
-		</div>
-		<div id="effort" class="segmented" role="group" aria-label="Reasoning effort" hidden></div>
-		<div id="mode" class="segmented" role="group" aria-label="Permission mode"></div>
-		<div class="row meta">
-			<div id="keyPicker">
+		<details id="advanced"><summary>Options <span id="modeBadge" class="chip" hidden></span><span id="effortBadge" class="chip" hidden></span><span id="credits" class="chip credits-chip"></span></summary>
+			<div id="effortWrap" hidden><span class="opt-label">Reasoning</span><div id="effort" class="segmented" role="group" aria-label="Reasoning effort"></div></div>
+			<div><span class="opt-label">Permissions</span><div id="mode" class="segmented" role="group" aria-label="Permission mode"></div></div>
+			<div><span class="opt-label">Keys</span><div id="keyPicker">
 				<button id="keyButton" class="unknown" type="button" title="API key" aria-label="API key" aria-haspopup="true" aria-expanded="false">
 					<svg class="key-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.5 1a4.5 4.5 0 0 0-4.36 5.63L1.15 11.6a.5.5 0 0 0-.15.36V14.5a.5.5 0 0 0 .5.5h2.75a.5.5 0 0 0 .5-.5V13h1.5a.5.5 0 0 0 .5-.5V11h1.5a.5.5 0 0 0 .35-.15l.77-.77A4.5 4.5 0 1 0 10.5 1Zm1 4.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>
 				</button>
@@ -601,10 +604,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 						</div>
 					</div>
 				</div>
-			</div>
-			<button id="credits" class="link" type="button"></button>
-			<span id="contextUsage"></span>
-		</div>
+			</div></div>
+			<div class="opt-row"><span class="opt-label">Credits</span><button id="creditsDetail" class="link" type="button"></button></div>
+			<div class="opt-row"><span class="opt-label">Context</span><span id="contextUsage"></span></div>
+		</details>
 	</footer>
 </main>
 <script nonce="${nonce}" src="${uri('markdown.js')}"></script>

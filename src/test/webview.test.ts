@@ -11,12 +11,15 @@ const BODY = `
 <section id="welcome" hidden><input id="gateway"><input id="apiKey"><input id="keyLabel"><p id="setupError" hidden></p><button id="saveConnection"></button><button id="getSubscription"></button><button id="closeSetup" hidden></button></section>
 <main id="app" hidden>
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
-<label id="selectionChip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
+<label id="selectionChip" class="chip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
 <div id="status" hidden></div><div id="queue" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
-<button id="attach"></button><button id="model"><span id="modelName"></span><small id="modelDetail"></small></button>
+<button id="attach"></button><button id="model"><span id="modelName"></span></button>
+<details id="advanced"><summary><span id="modeBadge" class="chip" hidden></span><span id="effortBadge" class="chip" hidden></span><span id="credits" class="chip"></span></summary>
+<div id="effortWrap" hidden><div id="effort"></div></div><div id="mode"></div>
 <div id="keyPicker"><button id="keyButton" aria-expanded="false"></button><div id="keyMenu" hidden><div id="keyList"></div><button id="addKey"></button><div id="keyForm" hidden><input id="newKey"><input id="newKeyName"><input id="newKeyGateway"><p id="keyError" hidden></p><button id="saveKey"></button><button id="cancelKey"></button></div></div></div>
-<div id="effort" hidden></div><div id="mode"></div>
-<button id="send"></button><button id="stop" hidden></button><button id="credits"></button><span id="contextUsage"></span>
+<button id="creditsDetail"></button><span id="contextUsage"></span>
+</details>
+<button id="send"></button><button id="stop" hidden></button>
 </main>`;
 
 const STATE = {
@@ -86,16 +89,18 @@ test('state fills pickers, per-model effort, credits and context use', () => {
 	send(STATE);
 	assert.equal($('app').hidden, false);
 	assert.equal($('modelName').textContent, 'A');
-	assert.match($('modelDetail').textContent ?? '', /Reasoning.*Search models/);
-	assert.equal($('effort').hidden, false);
+	assert.equal($('effortWrap').hidden, false);
 	assert.equal($('effort').querySelector('[aria-pressed="true"]')?.textContent, 'high');
 	assert.equal($('mode').querySelector('[aria-pressed="true"]')?.textContent, 'Ask first');
 	assert.equal($('credits').textContent, '$1.00 left');
 	assert.ok($('credits').className.includes('low'));
 	assert.equal($('contextUsage').textContent, '50% context');
 	send({ ...STATE, model: 'b', mode: 'bypassPermissions' });
-	assert.equal($('effort').hidden, true);
+	assert.equal($('effortWrap').hidden, true);
 	assert.ok($('mode').className.includes('danger'));
+	// Non-default choices surface as badges on the collapsed Options row.
+	assert.equal($('modeBadge').hidden, false);
+	assert.ok($('modeBadge').className.includes('danger'));
 });
 
 test('sending, model changes and Enter post the right messages', () => {
@@ -109,6 +114,11 @@ test('sending, model changes and Enter post the right messages', () => {
 	assert.deepEqual(posted.at(-1), { type: 'pickModel' });
 	send({ ...STATE, model: 'b' });
 	assert.equal($('modelName').textContent, 'B');
+	// Reload resilience: the webview re-requests state when it becomes visible again.
+	const before = posted.length;
+	dom.window.document.dispatchEvent(new dom.window.Event('visibilitychange'));
+	assert.equal(posted.length, before + 1);
+	assert.equal(posted.at(-1)?.type, 'ready');
 });
 
 test('selection preference restores from host state and changes are persisted', t => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17
+
+- A cleaner, calmer chat in the spirit of the Claude plugin: one rounded composer holds your message, attachments and the model picker, and the busy status now has a spinner. Tool calls and thinking collapse into quiet one-line pills instead of big boxes.
+- Advanced options (permission mode, reasoning effort, API keys, credits and context) are tucked behind a single "Options" row; non-default choices show as small badges so the defaults stay out of the way.
+- Fixed the "stuck" feeling: after a VS Code reload the panel re-loads its state as soon as it becomes visible instead of sitting empty, and a request that streams nothing for 90 seconds (configurable) now fails with a clear message and a Stop button instead of hanging for 10 minutes. The status line also says "Still waiting… press Stop" during long silences.
+
 ## 0.1.16
 
 - Remember permission mode (including previously confirmed bypass) and the include-selection checkbox per workspace across window reloads. Model and reasoning effort continue to persist.
