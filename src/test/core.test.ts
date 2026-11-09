@@ -910,6 +910,17 @@ test('a silent stream is reported instead of hanging forever', async () => {
 	await assert.rejects(collect(client({ idleTimeoutMs: 60 }).streamChat({ model: 'm', messages: [] })), /stopped responding/);
 });
 
+test('aborting unblocks a hung stream read quickly', async () => {
+	// The connection sends a heartbeat then stalls; Stop must end the read promptly,
+	// not wait for the idle watchdog.
+	handler = (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write(': hello\n\n'); };
+	const abort = new AbortController();
+	const started = Date.now();
+	setTimeout(() => abort.abort(), 60);
+	await assert.rejects(collect(client({ idleTimeoutMs: 30_000 }).streamChat({ model: 'm', messages: [] }, abort.signal)));
+	assert.ok(Date.now() - started < 5_000, 'abort should not wait for the 30s idle watchdog');
+});
+
 test('stopping a request is not reported as a hang', async () => {
 	handler = (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write(': hello\n\n'); };
 	const abort = new AbortController();

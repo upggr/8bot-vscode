@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.26
+
+- **Fixed the uninterruptible stream:** if the SSE connection stalled mid-read (no bytes, no close), Stop did nothing because the stream read never listened to the abort signal. The reader now cancels the moment you press Stop, and the agent breaks out of streaming as soon as it's aborted — so a wedged model can always be interrupted.
+
 ## 0.1.25
 
 - Interrupt and send now: each queued message has a ↯ button that stops the current run and sends it immediately, and **Cmd/Ctrl+Enter** while the agent is busy interrupts it with whatever you've typed — no more Stop → retype.

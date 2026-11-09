@@ -153,6 +153,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 				reasoningEffort: options.reasoningEffort,
 			}, signal);
 			for await (const event of stream) {
+				if (signal?.aborted) { break; }
 				if (event.type === 'text') { text += event.text; onEvent(event); }
 				else if (event.type === 'reasoning') { onEvent(event); }
 				else if (event.type === 'tool_call') { calls.push(event.call); }

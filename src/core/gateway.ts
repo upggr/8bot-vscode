@@ -207,7 +207,7 @@ export class GatewayClient implements ChatStreamer {
 		}
 
 		const calls = new Map<number, ToolCall>();
-		for await (const data of readSse(response.body)) {
+		for await (const data of readSse(response.body, signal)) {
 			touch();
 			if (data === '[DONE]') { break; }
 			let chunk: GatewayChunk;
@@ -382,13 +382,17 @@ function backoff(attempt: number): number {
 }
 
 /** Yields the `data:` payload of each server-sent event. */
-export async function* readSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+export async function* readSse(stream: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<string> {
 	const decoder = new TextDecoder();
 	const reader = stream.getReader();
 	let buffer = '';
 	let data: string[] = [];
+	// A hung read must still unblock the moment the user stops the request.
+	const onAbort = () => void reader.cancel().catch(() => undefined);
+	signal?.addEventListener('abort', onAbort, { once: true });
 	try {
 		for (;;) {
+			if (signal?.aborted) { return; }
 			const { value, done } = await reader.read();
 			buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
 			let newline: number;
@@ -408,6 +412,7 @@ export async function* readSse(stream: ReadableStream<Uint8Array>): AsyncGenerat
 			}
 		}
 	} finally {
+		signal?.removeEventListener('abort', onAbort);
 		// Not awaited: the gateway can end a stream with a malformed chunk, and cleanup must never block.
 		void reader.cancel().catch(() => undefined);
 	}
