@@ -99,6 +99,9 @@
 	const MAX_IMAGE_DIMENSION = 1600;
 	let pendingAttachments = [];
 	let screenshotCount = 0;
+	// @-mention autocomplete state.
+	let mention = null; // { start, query, results, index }
+	let mentionRequest = 0;
 
 	function post(type, extra) {
 		vscode.postMessage(Object.assign({ type: type }, extra));
@@ -298,6 +301,36 @@
 		}
 	}
 
+	function showSuggestions(list) {
+		const bar = $('suggestions');
+		bar.replaceChildren();
+		bar.hidden = list.length === 0;
+		list.forEach(text => {
+			const chip = element('button', 'suggestion-chip', text);
+			chip.type = 'button';
+			chip.addEventListener('click', () => {
+				bar.hidden = true;
+				input.value = text;
+				send();
+			});
+			bar.appendChild(chip);
+		});
+	}
+
+	function showRewind(rewind) {
+		const box = add(element('div', 'rewind-card'));
+		box.appendChild(element('span', 'muted', 'Edited ' + rewind.count + ' file' + (rewind.count === 1 ? '' : 's')));
+		const list = element('span', 'rewind-files', rewind.paths.slice(0, 4).join(', ') + (rewind.paths.length > 4 ? '…' : ''));
+		list.title = rewind.paths.join('\n');
+		box.appendChild(list);
+		const button = element('button', 'secondary', '⟲ Rewind');
+		button.type = 'button';
+		button.title = 'Restore these files to before this turn';
+		button.addEventListener('click', () => { box.remove(); post('rewind'); });
+		box.appendChild(button);
+		scroll();
+	}
+
 	function renderStatus() {
 		const status = $('status');
 		status.hidden = !state.busy;
@@ -344,7 +377,10 @@
 				endAssistant();
 				activity = null;
 				liveChars = 0;
+				closeMentions();
+				$('suggestions').hidden = true;
 				const box = add(element('div', 'message user', event.text));
+				(event.mentions || []).forEach(m => { box.appendChild(element('span', 'chip mention-chip', '@' + m)); });
 				(event.attachments || []).forEach(a => {
 					if (a.isImage && a.dataUrl) {
 						const img = element('img', 'thumb');
@@ -407,6 +443,7 @@
 				break;
 			case 'done':
 				endAssistant();
+				if (event.rewind && event.rewind.count > 0) { showRewind(event.rewind); }
 				break;
 			default:
 				break;
@@ -627,6 +664,58 @@
 		post('saveConnection', { gateway: $('gateway').value.trim(), key: $('apiKey').value.trim(), label: ($('keyLabel') ? $('keyLabel').value : '').trim() });
 	}
 
+	function closeMentions() {
+		mention = null;
+		$('mentionMenu').hidden = true;
+	}
+
+	function detectMention() {
+		const pos = input.selectionStart;
+		const before = input.value.slice(0, pos);
+		const match = before.match(/@([\w./-]*)$/);
+		if (!match) { closeMentions(); return; }
+		const start = pos - match[0].length;
+		// Only trigger when @ starts a token (beginning or after whitespace).
+		if (start > 0 && !/\s/.test(input.value[start - 1])) { closeMentions(); return; }
+		mention = { start: start, query: match[1], results: [], index: 0 };
+		const requestId = ++mentionRequest;
+		post('searchFiles', { id: String(requestId), value: mention.query });
+	}
+
+	function showMentions(results) {
+		if (!mention) { return; }
+		const menu = $('mentionMenu');
+		menu.replaceChildren();
+		if (results.length === 0) { menu.hidden = true; return; }
+		mention.results = results;
+		mention.index = 0;
+		results.forEach((file, i) => {
+			const item = element('div', 'mention-item' + (i === 0 ? ' active' : ''), file.path);
+			item.setAttribute('role', 'option');
+			item.addEventListener('mousedown', e => { e.preventDefault(); pickMention(i); });
+			menu.appendChild(item);
+		});
+		menu.hidden = false;
+	}
+
+	function moveMention(delta) {
+		if (!mention || mention.results.length === 0) { return false; }
+		mention.index = (mention.index + delta + mention.results.length) % mention.results.length;
+		$('mentionMenu').querySelectorAll('.mention-item').forEach((el, i) => el.classList.toggle('active', i === mention.index));
+		return true;
+	}
+
+	function pickMention(index) {
+		if (!mention || !mention.results.length) { return; }
+		const chosen = mention.results[index !== undefined ? index : mention.index];
+		const after = input.value.slice(input.selectionStart);
+		input.value = input.value.slice(0, mention.start) + '@' + chosen.path + ' ' + after;
+		const caret = mention.start + chosen.path.length + 2;
+		input.setSelectionRange(caret, caret);
+		closeMentions();
+		input.focus();
+	}
+
 	function send() {
 		const text = input.value.trim();
 		if (!text && pendingAttachments.length === 0) { return; }
@@ -637,11 +726,20 @@
 		post('send', { text: text, includeSelection: !$('selectionChip').hidden && $('includeSelection').checked, attachments: attachments });
 	}
 
+	input.addEventListener('input', detectMention);
+	input.addEventListener('click', () => { if (mention) { detectMention(); } });
 	input.addEventListener('keydown', event => {
+		if (mention && !$('mentionMenu').hidden) {
+			if (event.key === 'ArrowDown') { event.preventDefault(); moveMention(1); return; }
+			if (event.key === 'ArrowUp') { event.preventDefault(); moveMention(-1); return; }
+			if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) { event.preventDefault(); pickMention(); return; }
+			if (event.key === 'Escape') { event.preventDefault(); closeMentions(); return; }
+		}
 		if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
 			event.preventDefault();
 			send();
 		}
+		if (event.key === 'Escape' && !mention) { closeMentions(); }
 	});
 	$('send').addEventListener('click', send);
 	$('stop').addEventListener('click', () => post('stop', { value: 'all' }));
@@ -735,6 +833,11 @@
 			$('keyError').hidden = !message.error;
 			if (!message.error) { closeKeyMenu(); }
 		}
+		else if (message.type === 'fileResults') {
+			// Only honor the latest search, so fast typing doesn't show stale results.
+			if (mention && Number(message.id) === mentionRequest) { showMentions(message.results || []); }
+		}
+		else if (message.type === 'suggestions') { showSuggestions(message.suggestions || []); }
 		else if (message.type === 'focusInput') { input.value = message.text || ''; input.focus(); }
 	});
 

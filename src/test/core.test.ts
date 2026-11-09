@@ -9,6 +9,7 @@ import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } fro
 import { buildAttachedContent, canReadImages, truncateAttachmentText } from '../core/attachments';
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
+import { Checkpoints } from '../core/checkpoints';
 import { LiveLimit } from '../core/gateway';
 import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
@@ -610,6 +611,36 @@ test('truncateAttachmentText caps long text and flags it', () => {
 	assert.deepEqual(truncateAttachmentText('short'), { text: 'short', truncated: false });
 	const long = truncateAttachmentText('x'.repeat(10), 4);
 	assert.deepEqual(long, { text: 'xxxx', truncated: true });
+});
+
+test('checkpoints capture pre-edit content once and rewind restores it', async () => {
+	const store = new Map<string, string>([['a.ts', 'old a'], ['b.ts', 'old b']]);
+	const read = async (abs: string) => store.get(abs);
+	const join = (_root: string, rel: string) => rel;
+	const cp = new Checkpoints(read, join, '/r');
+	await cp.capture('write_file', { path: 'a.ts' });
+	await cp.capture('edit_file', { path: 'a.ts' }); // already captured, not overwritten
+	await cp.capture('edit_file', { path: 'b.ts' });
+	await cp.capture('read_file', { path: 'c.ts' }); // not an edit, ignored
+	assert.equal(cp.count, 2);
+	// Simulate the agent editing both files.
+	store.set('a.ts', 'new a');
+	store.set('b.ts', 'new b');
+	const written: [string, string | undefined][] = [];
+	const restored = await cp.rewind(async (abs, content) => { written.push([abs, content]); if (content === undefined) { store.delete(abs); } else { store.set(abs, content); } });
+	assert.deepEqual(restored.sort(), ['a.ts', 'b.ts']);
+	assert.equal(store.get('a.ts'), 'old a');
+	assert.equal(store.get('b.ts'), 'old b');
+	assert.equal(cp.count, 0, 'checkpoint cleared after rewind');
+});
+
+test('a new file captured by a checkpoint rewinds to deletion', async () => {
+	const store = new Map<string, string>();
+	const cp = new Checkpoints(async abs => store.get(abs), (_r, rel) => rel, '/r');
+	await cp.capture('write_file', { path: 'fresh.ts' });
+	store.set('fresh.ts', 'made by agent');
+	await cp.rewind(async (abs, content) => { if (content === undefined) { store.delete(abs); } else { store.set(abs, content); } });
+	assert.equal(store.has('fresh.ts'), false, 'new file removed on rewind');
 });
 
 test('key masking shows just enough to tell keys apart', () => {

@@ -2,7 +2,7 @@
   "name": "8bot-vscode",
   "displayName": "8bot: AI Coding Agent for the 8os Gateway (Unofficial)",
   "description": "Unofficial AI coding agent and chat for VS Code using your Pax8 8os Agent Gateway API key: sidebar chat, @8bot in VS Code Chat, model selection, file edits, terminal commands and permission modes.",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "publisher": "IoannisKokkinis",
   "author": {
     "name": "Ioannis Kokkinis",
@@ -293,6 +293,12 @@
           "maximum": 1800,
           "scope": "application",
           "description": "How long the model may stream nothing before the request counts as hung and is stopped. Thinking models can be quiet for a while, so keep this above 60 for them."
+        },
+        "eightbot.followupSuggestions": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Suggest a few one-click follow-up prompts after each reply."
         },
         "eightbot.showGuardNotices": {
           "type": "boolean",

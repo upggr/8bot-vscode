@@ -12,7 +12,7 @@ const BODY = `
 <main id="app" hidden>
 <select id="sessions"></select><button id="newChat"></button><div id="transcript"></div>
 <label id="selectionChip" class="chip" hidden><input id="includeSelection" type="checkbox" checked><span id="selectionText"></span></label>
-<div id="status" hidden></div><div id="queue" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
+<div id="suggestions" hidden></div><div id="status" hidden></div><div id="queue" hidden></div><div id="mentionMenu" hidden></div><div id="attachments" hidden></div><textarea id="input"></textarea><input id="fileInput" type="file" hidden>
 <button id="attach"></button><button id="model"><span id="modelName"></span></button>
 <details id="advanced"><summary><span id="modeBadge" class="chip" hidden></span><span id="effortBadge" class="chip" hidden></span><span id="credits" class="chip"></span></summary>
 <div id="effortWrap" hidden><div id="effort"></div></div><div id="mode"></div>
@@ -119,6 +119,50 @@ test('sending, model changes and Enter post the right messages', () => {
 	dom.window.document.dispatchEvent(new dom.window.Event('visibilitychange'));
 	assert.equal(posted.length, before + 1);
 	assert.equal(posted.at(-1)?.type, 'ready');
+});
+
+test('@-mention autocompletes files from the host and inserts the path', () => {
+	const { dom, posted, send, $, win } = load();
+	send(STATE);
+	const input = $('input') as unknown as HTMLTextAreaElement;
+	input.value = 'check @app';
+	input.setSelectionRange(input.value.length, input.value.length);
+	input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+	assert.deepEqual(posted.at(-1), { type: 'searchFiles', id: '1', value: 'app' });
+	send({ type: 'fileResults', id: '1', results: [{ path: 'src/app.ts' }, { path: 'src/app.test.ts' }] });
+	const menu = win.document.getElementById('mentionMenu') as HTMLElement & { hidden: boolean };
+	assert.equal(menu.hidden, false);
+	assert.equal(menu.querySelectorAll('.mention-item').length, 2);
+	// Enter picks the highlighted (first) file and inserts it.
+	input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	assert.equal(input.value, 'check @src/app.ts ');
+	assert.equal(menu.hidden, true);
+});
+
+test('a turn that edited files offers a rewind card', () => {
+	const { posted, send, win, dom } = load();
+	send(STATE);
+	send({ type: 'event', event: { type: 'done', rewind: { count: 2, paths: ['src/a.ts', 'src/b.ts'] } } });
+	const card = win.document.querySelector('.rewind-card');
+	assert.ok(card);
+	assert.match(card.textContent ?? '', /Edited 2 files/);
+	(card.querySelector('button') as HTMLButtonElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'rewind' });
+	assert.equal(win.document.querySelector('.rewind-card'), null, 'card dismisses after rewind');
+	dom.window.close();
+});
+
+test('follow-up suggestions render as chips that send on click', () => {
+	const { posted, send, win, dom } = load();
+	send(STATE);
+	send({ type: 'suggestions', suggestions: ['Add tests for this', 'Refactor for clarity'] });
+	const bar = win.document.getElementById('suggestions') as HTMLElement & { hidden: boolean };
+	assert.equal(bar.hidden, false);
+	const chips = bar.querySelectorAll('.suggestion-chip');
+	assert.equal(chips.length, 2);
+	(chips[0] as HTMLButtonElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'send', text: 'Add tests for this', includeSelection: false, attachments: [] });
+	dom.window.close();
 });
 
 test('selection preference restores from host state and changes are persisted', t => {

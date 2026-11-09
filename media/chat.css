@@ -88,6 +88,11 @@ button.link.low { color: var(--vscode-editorWarning-foreground); }
 button.link.empty { color: var(--vscode-errorForeground); }
 body.dragging::after { content: 'Drop to attach'; position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; font-size: 1.1em; background: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent); border: 2px dashed var(--vscode-focusBorder); pointer-events: none; }
 #attachments { padding: 0; }
+/* @-mention autocomplete. */
+#mentionMenu { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding: 4px; border-radius: 8px; background: var(--vscode-menu-background, var(--vscode-dropdown-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border)); box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0,0,0,0.36)); }
+.mention-item { padding: 4px 8px; border-radius: 5px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.9em; }
+.mention-item.active, .mention-item:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.mention-chip { font-family: var(--vscode-editor-font-family); font-size: 0.85em; color: var(--vscode-textLink-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
 .attach-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 0.85em; color: var(--vscode-foreground); }
 .attach-chip .at { color: var(--vscode-textLink-foreground); font-weight: 600; }
 .attach-chip input { accent-color: var(--vscode-button-background); }
@@ -135,6 +140,13 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; backgro
 /* An approval prompt stands apart so it is easy to act on, like Claude's permission card. */
 .permission-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--vscode-input-background); border: 1px solid var(--vscode-editorWarning-foreground); }
 .permission-card .perm-title { font-weight: 600; overflow-wrap: anywhere; }
+/* Rewind checkpoint, offered after a turn that edited files. */
+.rewind-card { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-radius: 8px; font-size: 0.88em; background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
+.rewind-card .rewind-files { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family); font-size: 0.92em; }
+/* One-click follow-up suggestions. */
+#suggestions { display: flex; flex-wrap: wrap; gap: 6px; }
+.suggestion-chip { padding: 4px 10px; border-radius: 999px; font-size: 0.85em; text-align: left; color: var(--vscode-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
+.suggestion-chip:hover { border-color: var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); }
 .permission-card p { margin: 0; }
 .permission-card .warning { color: var(--vscode-editorWarning-foreground); }
 .command { display: block; padding: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }

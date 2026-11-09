@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { Attachment, ATTACHMENTS_OPEN, buildAttachedContent, canReadImages, MAX_ATTACHMENTS } from '../core/attachments';
+import { Checkpoints } from '../core/checkpoints';
 import { SUMMARY_PREFIX, estimateTokens, outputTokenLimit } from '../core/context';
 import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
 import { BUY_URL } from '../core/credits';
@@ -18,6 +19,10 @@ import { Services } from './services';
 const DIFF_SCHEME = 'eightbot-diff';
 const ARCHIVED_TOOL_CHARS = 4_000;
 const CONTEXT_OPEN = '\n\n<editor_context>';
+const MENTIONS_OPEN = '\n\n<mentioned_files>';
+const MAX_MENTION_FILES = 20;
+const MAX_MENTION_BYTES = 100_000;
+const MENTION_IGNORED = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', 'target', 'vendor', '__pycache__', '.venv', '.vscode-test']);
 const HELP = [
 	'**Commands**',
 	'- `/new` start a new chat',
@@ -63,6 +68,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	/** Per-model usage accumulated for this chat, used by /cost. */
 	private spend = new Map<string, { requests: number; cost: number; promptTokens: number; completionTokens: number; cachedTokens: number; reasoningTokens: number }>();
 	private restored = false;
+	/** Files snapshotted before the current turn's edits, for one-click rewind. */
+	private checkpoints: Checkpoints | undefined;
+	private checkpointRoot = '';
+	private lastCheckpoint: { root: string; files: { path: string; before: string | undefined }[] } | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext, private readonly services: Services) {
 		const base = context.storageUri ?? context.globalStorageUri;
@@ -225,12 +234,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			case 'exportChat':
 				await this.exportChat();
 				break;
+			case 'searchFiles':
+				this.post({ type: 'fileResults', id: message.id ?? '', results: await this.searchWorkspaceFiles(message.value ?? '') });
+				break;
+			case 'rewind':
+				await this.rewindCheckpoint();
+				break;
 			case 'retry':
 				await this.retryLast();
 				break;
 			default:
 				break;
 		}
+	}
+
+	/** Restores the files the last turn edited back to their pre-turn content. */
+	private async rewindCheckpoint(): Promise<void> {
+		const checkpoint = this.lastCheckpoint;
+		if (!checkpoint) { return; }
+		this.lastCheckpoint = undefined;
+		const restored: string[] = [];
+		for (const file of [...checkpoint.files].reverse()) {
+			const abs = path.join(checkpoint.root, file.path);
+			try {
+				if (file.before === undefined) {
+					await vscode.workspace.fs.delete(vscode.Uri.file(abs));
+				} else {
+					await vscode.workspace.fs.writeFile(vscode.Uri.file(abs), Buffer.from(file.before, 'utf8'));
+				}
+				restored.push(file.path);
+			} catch { /* a file may already be gone */ }
+		}
+		this.post({ type: 'event', event: { type: 'notice', message: restored.length ? `Rewound ${restored.length} file${restored.length === 1 ? '' : 's'}: ${restored.join(', ')}.` : 'Nothing to rewind.' } });
+		this.post({ type: 'event', event: { type: 'done', rewind: undefined } });
 	}
 
 	private answerPermission(id: string, answer: PermissionAnswer): void {
@@ -314,6 +350,56 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		this.post({ type: 'transcript', items: transcriptItems([...(this.session.archive ?? []), ...this.session.messages]) });
 	}
 
+	/** Fuzzy file search for @-mentions: workspace-relative paths matching the query. */
+	private async searchWorkspaceFiles(query: string): Promise<{ path: string }[]> {
+		const exclude = `{${[...MENTION_IGNORED].map(d => `**/${d}/**`).join(',')}}`;
+		const files = await vscode.workspace.findFiles('**/*', exclude, 400);
+		const q = query.trim().toLowerCase();
+		const scored = files
+			.map(uri => vscode.workspace.asRelativePath(uri))
+			.filter(rel => !rel.split('/').some(seg => MENTION_IGNORED.has(seg)))
+			.map(rel => ({ path: rel, score: mentionScore(rel, q) }))
+			.filter(x => x.score >= 0)
+			.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+		const seen = new Set<string>();
+		const results: { path: string }[] = [];
+		for (const item of scored) {
+			if (seen.has(item.path)) { continue; }
+			seen.add(item.path);
+			results.push({ path: item.path });
+			if (results.length >= MAX_MENTION_FILES) { break; }
+		}
+		return results;
+	}
+
+	/** Reads @-mentioned files from the message and inlines their content for the model. */
+	private async resolveMentions(root: string, text: string): Promise<{ mentions: { path: string }[]; block: string }> {
+		const names = new Set<string>();
+		for (const match of text.matchAll(/@([\w./-]+)/g)) { names.add(match[1]); }
+		if (names.size === 0) { return { mentions: [], block: '' }; }
+		const parts: string[] = [];
+		const resolved: { path: string }[] = [];
+		let bytes = 0;
+		for (const name of names) {
+			const [found] = await this.searchWorkspaceFiles(name);
+			if (!found) { continue; }
+			const abs = path.join(root, found.path);
+			try {
+				const stat = await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+				if (stat.type !== vscode.FileType.File) { continue; }
+				const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
+				const content = Buffer.from(raw).toString('utf8');
+				if (content.includes('�')) { continue; } // likely binary
+				const trimmed = content.length > MAX_MENTION_BYTES ? content.slice(0, MAX_MENTION_BYTES) + '\n[... truncated ...]' : content;
+				if (bytes + trimmed.length > MAX_MENTION_BYTES) { break; }
+				bytes += trimmed.length;
+				resolved.push(found);
+				parts.push(`--- ${found.path} ---\n${trimmed}`);
+			} catch { /* skip unreadable */ }
+		}
+		return { mentions: resolved, block: parts.length ? `${MENTIONS_OPEN}\n${parts.join('\n\n')}\n</mentioned_files>` : '' };
+	}
+
 	private async send(text: string, includeSelection: boolean, attachments: Attachment[] = []): Promise<void> {
 		if (this.abort) { return; }
 		if (text.startsWith('/') && await this.slashCommand(text)) { return; }
@@ -328,16 +414,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 
 		const selection = includeSelection ? this.editorContext() : undefined;
 		this.lastSent = { text, includeSelection: includeSelection && !!selection, attachments };
-		const withSelection = selection ? `${text}${CONTEXT_OPEN}\nSelected from ${selection.file}:${selection.lines}\n${selection.text}\n</editor_context>` : text;
+		let withSelection = selection ? `${text}${CONTEXT_OPEN}\nSelected from ${selection.file}:${selection.lines}\n${selection.text}\n</editor_context>` : text;
+		const { mentions, block: mentionBlock } = await this.resolveMentions(root, text);
+		if (mentionBlock) { withSelection += mentionBlock; }
 		const modelId = this.services.model;
 		const info = await this.services.modelInfo(modelId);
 		const content = buildAttachedContent(withSelection, attachments, canReadImages(modelId, info?.supportsImages));
 		this.session.messages.push({ role: 'user', content });
 		if (this.session.title === 'New chat') { this.session.title = (text || attachments[0]?.name || 'Attachment').slice(0, 60); }
-		this.post({ type: 'event', event: { type: 'user', text, attachments: attachments.map(a => ({ name: a.name, mime: a.mime, isImage: !!a.dataUrl, dataUrl: a.dataUrl })) } });
+		this.post({ type: 'event', event: { type: 'user', text, attachments: attachments.map(a => ({ name: a.name, mime: a.mime, isImage: !!a.dataUrl, dataUrl: a.dataUrl })), mentions: mentions.map(m => m.path) } });
 
 		const abort = new AbortController();
 		this.abort = abort;
+		this.lastCheckpoint = undefined;
 		await this.postState();
 		await this.run(client, root, abort);
 	}
@@ -351,6 +440,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		}
 		const info = await services.modelInfo(model);
 		const effort = services.config.get<string>('reasoningEffort', '');
+		this.checkpointRoot = root;
+		this.checkpoints = new Checkpoints(readFileOrUndefined, (r, rel) => path.join(r, rel), root);
 		try {
 			await runAgent({
 				client,
@@ -381,16 +472,48 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			this.post({ type: 'event', event: { type: 'error', message, showBuy: limitOrKey } });
 		} finally {
 			this.abort = undefined;
+			if (this.checkpoints && this.checkpoints.count > 0) {
+				this.lastCheckpoint = { root: this.checkpointRoot, files: this.checkpoints.snapshot };
+			}
+			this.checkpoints = undefined;
 			this.session.updatedAt = Date.now();
 			await this.store.save(this.session).catch(() => undefined);
-			this.post({ type: 'event', event: { type: 'done' } });
+			this.post({ type: 'event', event: { type: 'done', rewind: this.lastCheckpoint ? { count: this.lastCheckpoint.files.length, paths: this.lastCheckpoint.files.map(f => f.path) } : undefined } });
 			await this.postState();
+			void this.suggestFollowups(client, model);
 		}
 		const next = this.queue.shift();
 		if (next) {
 			await this.postState();
 			await this.send(next.text, next.includeSelection, next.attachments);
 		}
+	}
+
+	/** Generates a few one-click follow-up prompts from the last exchange, shown as chips. */
+	private async suggestFollowups(client: GatewayClient, model: string): Promise<void> {
+		if (!this.services.config.get<boolean>('followupSuggestions', true)) { return; }
+		const lastUser = [...this.session.messages].reverse().find(m => m.role === 'user');
+		const lastAssistant = [...this.session.messages].reverse().find(m => m.role === 'assistant' && typeof m.content === 'string' && m.content);
+		if (!lastUser || !lastAssistant) { return; }
+		const clip = (s: string, n: number) => s.length > n ? s.slice(0, n) + '…' : s;
+		const userText = clip(rawUserText(lastUser.content), 400);
+		const assistantText = clip(String(lastAssistant.content), 600);
+		const prompt = [
+			'You suggest 3 short follow-up requests the user might send next in a coding session.',
+			'Reply with ONLY 3 lines, each a concise imperative (max 8 words), no numbering, no bullets, no quotes.',
+			'Make them specific and actionable (tests, refactor, explain, run, docs).',
+			'',
+			`User asked: ${userText}`,
+			`Assistant replied: ${assistantText}`,
+		].join('\n');
+		try {
+			let text = '';
+			for await (const event of client.streamChat({ model, messages: [{ role: 'user', content: prompt }], maxTokens: 120 })) {
+				if (event.type === 'text') { text += event.text; }
+			}
+			const suggestions = text.split('\n').map(l => l.replace(/^[-*•\d.)\s]+/, '').trim()).filter(l => l.length > 2 && l.length < 80).slice(0, 3);
+			if (suggestions.length) { this.post({ type: 'suggestions', suggestions }); }
+		} catch { /* suggestions are best-effort */ }
 	}
 
 	private async systemPrompt(root: string): Promise<string> {
@@ -412,6 +535,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		if (event.type === 'compacted') {
 			this.archive(event.removed);
 			return;
+		}
+		if (event.type === 'toolStart') {
+			// Snapshot the target before the edit lands, so the whole turn can be rewound.
+			void this.checkpoints?.capture(event.tool, event.args);
 		}
 		if (event.type === 'usage') {
 			this.lastPromptTokens = event.usage.promptTokens;
@@ -571,6 +698,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	<footer>
 		<div class="composer">
 			<label id="selectionChip" class="chip attach-chip" hidden><span class="at" aria-hidden="true">@</span><input id="includeSelection" type="checkbox" checked aria-label="Include the editor selection"><span id="selectionText"></span></label>
+			<div id="mentionMenu" role="listbox" aria-label="Mention a file" hidden></div>
 			<div id="attachments" class="row" hidden></div>
 			<textarea id="input" rows="3" placeholder="Ask anything… drop or paste files, or type / for commands" aria-label="Message"></textarea>
 			<input id="fileInput" type="file" multiple hidden>
@@ -583,6 +711,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				<button id="stop" class="icon ghost" type="button" title="Stop" aria-label="Stop" hidden>■</button>
 			</div>
 		</div>
+		<div id="suggestions" hidden></div>
 		<div id="status" class="muted" role="status" hidden></div>
 		<div id="queue" hidden></div>
 		<details id="advanced"><summary>Options <span id="modeBadge" class="chip" hidden></span><span id="effortBadge" class="chip" hidden></span><span id="credits" class="chip credits-chip"></span></summary>
@@ -617,6 +746,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 </body>
 </html>`;
 	}
+}
+
+async function readFileOrUndefined(absPath: string): Promise<string | undefined> {
+	try {
+		const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(absPath));
+		return Buffer.from(raw).toString('utf8');
+	} catch {
+		return undefined;
+	}
+}
+
+/** Fuzzy match score for an @-mention query against a relative path. -1 = no match; higher = better. */
+function mentionScore(relPath: string, query: string): number {
+	if (!query) { return 0; }
+	const lower = relPath.toLowerCase();
+	const base = lower.split('/').pop() ?? lower;
+	if (base.startsWith(query)) { return 100 - base.length; }
+	if (lower.includes(query)) { return 50 - lower.indexOf(query); }
+	// Subsequence match across the whole path.
+	let i = 0;
+	for (const ch of lower) { if (ch === query[i]) { i++; if (i === query.length) { return 10; } } }
+	return i === query.length ? 10 : -1;
 }
 
 function rawUserText(content: ChatMessage['content']): string {

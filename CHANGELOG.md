@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.22
+
+- **@-mention files:** type `@` in the input and autocomplete any workspace file (`@src/app.ts`) to pull its content straight into context — precise, like Cursor/Continue. Fuzzy search, keyboard navigation (arrows/Tab/Enter), and the mentioned files show as chips on your message.
+- **Checkpoints & one-click Rewind:** before the agent edits, 8bot snapshots the files it's about to touch. After a turn that changed files, a "⟲ Rewind" card restores them to how they were — a safety net that pairs with bypass mode. New files made by the agent are removed on rewind.
+- **Follow-up suggestions:** after each reply, a few one-click chips ("Add tests for this", "Refactor for clarity") keep the work moving. Turn off with `eightbot.followupSuggestions`.
+
 ## 0.1.21
 
 - Hide the "gateway guard flagged this request" notice from the chat entirely — it is routine PII-masking info that fires on most requests. It now goes only to the debug console. Set `eightbot.showGuardNotices` to bring it back (shown once per run, then counted).
