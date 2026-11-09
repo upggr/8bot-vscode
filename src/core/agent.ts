@@ -256,7 +256,7 @@ async function executeCall(call: ToolCall, options: AgentOptions, remembered: Se
 		return report(onEvent, call.id, name, {}, name, false, `The arguments for ${name} were not valid JSON. The output may have been cut off. Try again with a smaller change.`);
 	}
 	if (name === SPAWN_TOOL) {
-		return runSubagent(call.id, args, options, remembered);
+		return runSubagent(call.id, args, options);
 	}
 	const tool = findTool(name);
 	if (!tool) {
@@ -297,7 +297,7 @@ const SUBAGENT_MAX_TURNS = 12;
 const SUBAGENT_CHARS = 12_000;
 
 /** Runs a focused sub-agent with its own fresh conversation and returns its final answer. */
-async function runSubagent(callId: string, args: Record<string, unknown>, options: AgentOptions, remembered: Set<string>): Promise<string> {
+async function runSubagent(callId: string, args: Record<string, unknown>, options: AgentOptions): Promise<string> {
 	const { onEvent } = options;
 	const task = typeof args.task === 'string' ? args.task.trim() : '';
 	const label = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : 'subtask';
