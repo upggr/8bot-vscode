@@ -156,6 +156,24 @@ test('reports gateway guard flags', async () => {
 	assert.deepEqual(events[0], { type: 'guard', result: 'flagged', risk: 'high', recommendation: 'none' });
 });
 
+test('the gateway guard is reported once, then counted, not repeated', async () => {
+	const { root, clean } = workspace();
+	try {
+		const events: AgentEvent[] = [];
+		const guard = (result: string): StreamEvent => ({ type: 'guard', result, risk: 'ok', recommendation: 'notify' });
+		const stream = scripted([
+			[guard('masked'), call('1', 'read_file', { path: 'a' })],
+			[guard('masked'), call('2', 'read_file', { path: 'a' })],
+			[guard('masked'), say('done')],
+		]);
+		await runAgent(agentOptions(stream, root, 'default', 'allow', events));
+		// One live notice for the first flag, plus a single count summary at the end — not one per request.
+		const live = events.filter(e => e.type === 'notice' && e.message.includes('flagged this request'));
+		assert.equal(live.length, 1, 'only one live guard notice');
+		assert.ok(events.some(e => e.type === 'notice' && e.message.includes('flagged 3 requests')));
+	} finally { clean(); }
+});
+
 test('retries keep the same idempotency key', async () => {
 	const keys: unknown[] = [];
 	handler = (req, res) => {

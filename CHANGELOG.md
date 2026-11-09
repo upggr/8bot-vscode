@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.20
+
+- Stop the "gateway guard flagged this request" notice from repeating: the gateway's guard can flag every request, so 8bot now shows it once, then a single count (e.g. "flagged 3 requests in this run") instead of a line per request.
+
 ## 0.1.19
 
 - Dark sorcery while you wait: the busy status now cycles through grim little phrases — "Summoning the spirits…", "Consulting the void…", "Raising the dead code…" — and the tool group reads "Weaving…" then "N rites performed", in the spirit of Claude's playful waiting verbs but darker.

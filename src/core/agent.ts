@@ -102,6 +102,8 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 	let recovered = false;
 	let emptyReplies = 0;
 	let maxTokens = options.maxTokens;
+	// The gateway guard can flag every request; report it once, then just count repeats.
+	let guardNotices = 0;
 
 	const summarize = async (turn: number, message: string, keepTokens = keepTokensFor(contextWindow)): Promise<boolean> => {
 		onEvent({ type: 'notice', message });
@@ -160,7 +162,12 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 					contextWindow = event.contextWindow;
 					onEvent({ type: 'notice', message: `Automatic routing was rejected by the gateway, so this request continues on ${event.name}.` });
 				}
-				else if (event.type === 'guard') { onEvent({ type: 'notice', message: `The gateway guard flagged this request (result: ${event.result}, risk: ${event.risk}, recommendation: ${event.recommendation}).` }); }
+				else if (event.type === 'guard') {
+					guardNotices++;
+					if (guardNotices === 1) {
+						onEvent({ type: 'notice', message: `The gateway guard flagged this request (result: ${event.result}, risk: ${event.risk}, recommendation: ${event.recommendation}).` });
+					}
+				}
 				else { finish = event.reason; }
 			}
 		} catch (error) {
@@ -201,6 +208,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 
 		if (calls.length === 0) {
 			if (finish === 'length') { onEvent({ type: 'notice', message: 'The response stopped at the output token limit.' }); }
+			if (guardNotices > 1) { onEvent({ type: 'notice', message: `(The gateway guard flagged ${guardNotices} requests in this run.)` }); }
 			return;
 		}
 
