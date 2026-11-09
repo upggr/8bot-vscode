@@ -39,6 +39,8 @@ export interface AgentOptions {
 	modelMaxOutput?: number;
 	reasoningEffort?: string;
 	supportsTools?: boolean;
+	/** Surface the gateway's content-guard flags in the chat. Off by default since it is routine and noisy. */
+	showGuardNotices?: boolean;
 	getMode(): PermissionMode;
 	requestPermission(request: PermissionRequest): Promise<PermissionAnswer>;
 	onEvent(event: AgentEvent): void;
@@ -164,7 +166,9 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 				}
 				else if (event.type === 'guard') {
 					guardNotices++;
-					if (guardNotices === 1) {
+					// Routine PII-masking info; log it and only surface in chat when explicitly enabled.
+					console.debug(`8bot: gateway guard flagged this request (result: ${event.result}, risk: ${event.risk}, recommendation: ${event.recommendation}).`);
+					if (options.showGuardNotices && guardNotices === 1) {
 						onEvent({ type: 'notice', message: `The gateway guard flagged this request (result: ${event.result}, risk: ${event.risk}, recommendation: ${event.recommendation}).` });
 					}
 				}
@@ -208,7 +212,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 
 		if (calls.length === 0) {
 			if (finish === 'length') { onEvent({ type: 'notice', message: 'The response stopped at the output token limit.' }); }
-			if (guardNotices > 1) { onEvent({ type: 'notice', message: `(The gateway guard flagged ${guardNotices} requests in this run.)` }); }
+			if (options.showGuardNotices && guardNotices > 1) { onEvent({ type: 'notice', message: `(The gateway guard flagged ${guardNotices} requests in this run.)` }); }
 			return;
 		}
 

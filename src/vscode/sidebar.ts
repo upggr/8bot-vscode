@@ -366,6 +366,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				reasoningEffort: effort && info?.reasoningEfforts.includes(effort) ? effort : undefined,
 				contextWindow: info?.contextWindow,
 				supportsTools: info?.supportsTools,
+				showGuardNotices: services.config.get<boolean>('showGuardNotices', false),
 				getMode: () => services.mode,
 				requestPermission: request => this.requestPermission(request, abort.signal),
 				onEvent: event => this.onAgentEvent(event),

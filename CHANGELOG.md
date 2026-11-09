@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.21
+
+- Hide the "gateway guard flagged this request" notice from the chat entirely — it is routine PII-masking info that fires on most requests. It now goes only to the debug console. Set `eightbot.showGuardNotices` to bring it back (shown once per run, then counted).
+
 ## 0.1.20
 
 - Stop the "gateway guard flagged this request" notice from repeating: the gateway's guard can flag every request, so 8bot now shows it once, then a single count (e.g. "flagged 3 requests in this run") instead of a line per request.
