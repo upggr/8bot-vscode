@@ -56,6 +56,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 	private session: Session = newSession();
 	private readonly store: SessionStore;
 	private abort: AbortController | undefined;
+	/** Set when the user sent a message that should interrupt the current run instead of queuing. */
+	private interruptQueued = false;
 	private remembered = new Set<string>();
 	/** Messages typed while a request is running, sent in order once it finishes. */
 	private readonly queue: { text: string; includeSelection: boolean; attachments: Attachment[] }[] = [];
@@ -181,6 +183,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				this.queue.splice(Number(message.id), 1);
 				await this.postState();
 				break;
+			case 'interruptSend': {
+				// Stop the current run, keep any later queued messages, and send this one first.
+				const text = message.text?.trim() ?? '';
+				const attachments = (message.attachments ?? []).slice(0, MAX_ATTACHMENTS);
+				if (!text && attachments.length === 0) { break; }
+				// If this came from a queued chip, drop that entry so it is not sent twice.
+				if (message.id !== undefined) { this.queue.splice(Number(message.id), 1); }
+				if (!this.abort) { await this.send(text, message.includeSelection === true, attachments); break; }
+				this.queue.unshift({ text, includeSelection: message.includeSelection === true, attachments });
+				this.interruptQueued = true;
+				this.stop();
+				await this.postState();
+				break;
+			}
 			case 'stop':
 				if (message.value === 'all') { this.queue.length = 0; }
 				this.stop();
@@ -482,6 +498,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			await this.postState();
 			void this.suggestFollowups(client, model);
 		}
+		// An interrupt message runs even though this turn was aborted; a normally-finished
+		// turn drains the queue as usual.
+		const wasInterrupted = this.interruptQueued;
+		this.interruptQueued = false;
+		if (abort.signal.aborted && !wasInterrupted) { return; }
 		const next = this.queue.shift();
 		if (next) {
 			await this.postState();

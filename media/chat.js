@@ -606,7 +606,13 @@
 		queueBar.replaceChildren();
 		queueBar.hidden = !next.queue || next.queue.length === 0;
 		(next.queue || []).forEach(item => {
-			const chip = element('span', 'chip', '⏳ ' + item.text.slice(0, 60));
+			const chip = element('span', 'chip queue-chip');
+			chip.appendChild(document.createTextNode('⏳ ' + item.text.slice(0, 60)));
+			const now = element('button', 'link queue-now', '↯');
+			now.type = 'button';
+			now.title = 'Interrupt the current run and send this now';
+			now.addEventListener('click', () => post('interruptSend', { id: String(item.index), text: item.text, includeSelection: false, attachments: [] }));
+			chip.appendChild(now);
 			const remove = element('button', 'link', '×');
 			remove.type = 'button';
 			remove.title = 'Remove from queue';
@@ -721,6 +727,17 @@
 		input.focus();
 	}
 
+	function sendNow() {
+		const text = input.value.trim();
+		if (!text && pendingAttachments.length === 0) { return; }
+		const attachments = pendingAttachments;
+		pendingAttachments = [];
+		renderAttachments();
+		input.value = '';
+		closeMentions();
+		post('interruptSend', { text: text, includeSelection: !$('selectionChip').hidden && $('includeSelection').checked, attachments: attachments });
+	}
+
 	function send() {
 		const text = input.value.trim();
 		if (!text && pendingAttachments.length === 0) { return; }
@@ -742,7 +759,9 @@
 		}
 		if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
 			event.preventDefault();
-			send();
+			// Cmd/Ctrl+Enter while the agent is busy interrupts it and sends right away.
+			if (state.busy && (event.metaKey || event.ctrlKey)) { sendNow(); }
+			else { send(); }
 		}
 		if (event.key === 'Escape' && !mention) { closeMentions(); }
 	});

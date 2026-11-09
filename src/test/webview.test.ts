@@ -323,10 +323,24 @@ test('messages typed while busy are queued and can be removed', () => {
 	assert.equal($('queue').hidden, false);
 	assert.match($('queue').textContent ?? '', /second request/);
 	assert.match($('status').textContent ?? '', /1 queued/);
-	(win.document.querySelector('#queue button') as HTMLButtonElement).click();
+	// The last button in a chip is the remove (×); the ↯ interrupts and sends now.
+	const buttons = [...win.document.querySelectorAll('#queue button')] as HTMLButtonElement[];
+	(buttons.at(-1) as HTMLButtonElement).click();
 	assert.deepEqual(posted.at(-1), { type: 'removeQueued', id: '0' });
 	send({ ...STATE, busy: false, queue: [] });
 	assert.equal($('queue').hidden, true);
+	dom.window.close();
+});
+
+test('a queued message can interrupt the current run and send now', () => {
+	const { posted, send, $, win, dom } = load();
+	send({ ...STATE, busy: true, queue: [{ index: 2, text: 'do this instead' }] });
+	(win.document.querySelector('#queue .queue-now') as HTMLButtonElement).click();
+	assert.deepEqual(posted.at(-1), { type: 'interruptSend', id: '2', text: 'do this instead', includeSelection: false, attachments: [] });
+	// Cmd/Ctrl+Enter in the input also interrupts with whatever is typed.
+	$('input').value = 'urgent follow-up';
+	$('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+	assert.deepEqual(posted.at(-1), { type: 'interruptSend', text: 'urgent follow-up', includeSelection: false, attachments: [] });
 	dom.window.close();
 });
 

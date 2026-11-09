@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.25
+
+- Interrupt and send now: each queued message has a ↯ button that stops the current run and sends it immediately, and **Cmd/Ctrl+Enter** while the agent is busy interrupts it with whatever you've typed — no more Stop → retype.
+
 ## 0.1.24
 
 - Queued messages now sit right under the chat transcript (just above the input) instead of down by the status line, so they read as part of the conversation.
