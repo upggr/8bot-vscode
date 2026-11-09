@@ -339,7 +339,10 @@
 		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
 		let base;
 		if (awaitingApproval) { base = '⚠ Awaiting your blessing (approval)'; }
-		else if (liveChars) { base = seconds > 2 ? INCANTATIONS[incantation] + '… ' + seconds + 's quiet' : INCANTATIONS[incantation] + '…'; }
+		else if (liveChars) {
+			// Tokens are arriving, so report the pause since the last one, not a dead stream.
+			base = seconds > 3 ? INCANTATIONS[incantation] + '… · ' + seconds + 's since last token' : INCANTATIONS[incantation] + '…';
+		}
 		else { base = seconds < 30 ? INCANTATIONS[incantation] + '… ' + seconds + 's' : 'The spirits are silent (' + seconds + 's) — press Stop to break the spell'; }
 		const liveTokens = Math.ceil(liveChars / 4);
 		const rate = costRates.get(state.liveModel || state.model);
@@ -396,10 +399,12 @@
 			}
 			case 'text':
 				liveChars += event.text.length;
+				lastActivity = Date.now();
 				appendAssistant(event.text);
 				break;
 			case 'reasoning':
 				liveChars += event.text.length;
+				lastActivity = Date.now();
 				if (!reasoningEl) {
 					const box = add(element('details', 'reasoning'));
 					box.appendChild(element('summary', '', 'Thinking…'));
