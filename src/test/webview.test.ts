@@ -209,17 +209,17 @@ test('the key picker shows the active key and switches, forgets and adds keys', 
 test('permission card answers once and tool output is plain text', () => {
 	const { posted, send, $, win } = load();
 	send(STATE);
-	send({ type: 'event', event: { type: 'toolStart', callId: 'c', summary: '<b>Run</b>' } });
-	send({ type: 'event', event: { type: 'permission', callId: 'c', summary: 's', detail: 'rm x', canDiff: true, sensitive: true } });
+	send({ type: 'event', event: { type: 'toolStart', callId: 'c', tool: 'run_command', summary: '<b>Run</b>' } });
+	send({ type: 'event', event: { type: 'permission', callId: 'c', tool: 'run_command', summary: 'Run command', detail: 'rm x', canDiff: true, sensitive: true } });
 	const allow = win.document.querySelector('[data-answer="allow"]') as HTMLButtonElement;
 	assert.ok(allow);
 	assert.ok(win.document.querySelector('.warning'));
 	allow.click();
 	assert.deepEqual(posted.at(-1), { type: 'permission', id: 'c', answer: 'allow' });
-	assert.equal(win.document.querySelector('.permission'), null);
+	assert.equal(win.document.querySelector('.permission-card'), null);
 	send({ type: 'event', event: { type: 'toolEnd', callId: 'c', ok: true, output: '<img src=x>' } });
-	assert.equal(win.document.querySelector('.tool img'), null);
-	assert.equal(win.document.querySelector('.tool summary b'), null);
+	assert.equal(win.document.querySelector('.activity img'), null);
+	assert.equal(win.document.querySelector('.activity-item .verb b'), null);
 	assert.equal($('transcript').querySelector('.output')?.textContent, '<img src=x>');
 });
 
@@ -246,6 +246,26 @@ test('a busy chat shows a live token estimate while the model streams', () => {
 	send({ type: 'event', event: { type: 'text', text: 'y'.repeat(400) } });
 	assert.match($('status').textContent ?? '', /~\$0\.000200/);
 	send({ ...STATE, busy: false });
+	dom.window.close();
+});
+
+test('tool calls batch into one collapsed activity group instead of many boxes', () => {
+	const { send, win, dom } = load();
+	send(STATE);
+	// Simulate one assistant turn with several tool calls back to back.
+	send({ type: 'event', event: { type: 'toolStart', callId: 'a', tool: 'read_file', summary: 'Read src/main.ts' } });
+	send({ type: 'event', event: { type: 'toolEnd', callId: 'a', ok: true, output: 'code' } });
+	send({ type: 'event', event: { type: 'toolStart', callId: 'b', tool: 'run_command', summary: 'Run npm test' } });
+	send({ type: 'event', event: { type: 'toolStart', callId: 'c', tool: 'edit_file', summary: 'Edit src/main.ts' } });
+	send({ type: 'event', event: { type: 'toolEnd', callId: 'b', ok: true, output: 'ok' } });
+	send({ type: 'event', event: { type: 'toolEnd', callId: 'c', ok: true, output: 'done' } });
+	const groups = win.document.querySelectorAll('.activity');
+	assert.equal(groups.length, 1, 'all tools share one group');
+	assert.equal(groups[0].querySelectorAll('.activity-item').length, 3);
+	// When the turn ends the group folds to a quiet summary, not an open list.
+	send({ type: 'event', event: { type: 'text', text: 'Done.' } });
+	assert.equal((groups[0] as HTMLDetailsElement).open, false);
+	assert.match(groups[0].querySelector('summary')?.textContent ?? '', /3 actions/);
 	dom.window.close();
 });
 

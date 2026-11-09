@@ -18,7 +18,71 @@
 	let lastActivity = Date.now();
 	let awaitingApproval = false;
 	let statusTimer;
+	// Tool calls for the current assistant turn, batched into one collapsible group
+	// so a long run of commands does not flood the transcript.
+	let activity = null;
 	const tools = new Map();
+	const TOOL_VERBS = { read_file: 'Read', search_text: 'Searched', list_files: 'Listed', edit_file: 'Edited', write_file: 'Wrote', run_command: 'Ran', save_memory: 'Saved memory', web_search: 'Searched the web', fetch_url: 'Fetched' };
+
+	function verbFor(toolName, summary) {
+		const verb = TOOL_VERBS[toolName];
+		if (verb) { return verb; }
+		return summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : 'Tool';
+	}
+
+	function toolTarget(summary, toolName) {
+		if (TOOL_VERBS[toolName]) {
+			const cleaned = summary.replace(/^(Read|Searched for|Listed|Edit|Create|Ran|Save|Search|Fetch)\s+/i, '');
+			return cleaned || summary;
+		}
+		return '';
+	}
+
+	function ensureActivity() {
+		if (!activity) {
+			activity = add(element('details', 'activity'));
+			activity.appendChild(element('summary', '', ''));
+			activity.appendChild(element('div', 'activity-list'));
+			activity.open = true;
+		}
+		return activity;
+	}
+
+	function activitySummary() {
+		if (!activity) { return; }
+		const total = activity.querySelector('.activity-list').children.length;
+		const running = activity.querySelectorAll('.activity-item.running').length;
+		const open = activity.open;
+		const summary = activity.querySelector('summary');
+		summary.textContent = running > 0
+			? 'Working… ' + (total - running + 1) + '/' + total
+			: total === 1 ? '1 action' : total + ' actions';
+		if (running === 0 && open) { activity.open = false; }
+	}
+
+	function startTool(event) {
+		const group = ensureActivity();
+		const item = element('div', 'activity-item running');
+		item.appendChild(element('span', 'verb', verbFor(event.tool, event.summary)));
+		item.appendChild(element('span', 'target', toolTarget(event.summary, event.tool)));
+		const output = element('pre', 'output');
+		item.appendChild(output);
+		group.querySelector('.activity-list').appendChild(item);
+		tools.set(event.callId, item);
+		activitySummary();
+		scroll();
+	}
+
+	function endTool(callId, ok, output) {
+		const item = tools.get(callId);
+		if (item) {
+			item.classList.remove('running');
+			item.classList.add(ok ? 'ok' : 'failed');
+			item.querySelector('.output').textContent = output;
+			tools.delete(callId);
+		}
+		activitySummary();
+	}
 
 	// Kept in sync with src/core/attachments.ts.
 	const MAX_ATTACHMENTS = 5;
@@ -178,27 +242,19 @@
 		}
 	}
 
-	function toolCard(summary) {
-		const card = element('details', 'tool running');
-		const head = element('summary', '', summary);
-		const output = element('pre', 'output');
-		card.append(head, output);
+	function toolCard(summary, output) {
+		// Used only for restoring a saved chat: one collapsed details card per tool.
+		const card = element('details', 'tool');
+		card.appendChild(element('summary', '', summary));
+		card.appendChild(element('pre', 'output')).textContent = output;
 		return card;
 	}
 
-	function finishTool(card, ok, output) {
-		card.classList.remove('running');
-		card.classList.add(ok ? 'ok' : 'failed');
-		card.querySelector('.output').textContent = output;
-		const permission = card.querySelector('.permission');
-		if (permission) { permission.remove(); }
-	}
-
 	function showPermission(event) {
-		const card = tools.get(event.callId);
-		if (!card) { return; }
-		card.open = true;
-		const box = element('div', 'permission');
+		// Approvals stand out on their own card (like Claude), not buried inside a tool pill.
+		const box = add(element('div', 'permission-card'));
+		box.dataset.callId = event.callId;
+		box.appendChild(element('div', 'perm-title', verbFor(event.tool, event.summary) + ' ' + toolTarget(event.summary, event.tool)));
 		if (event.sensitive) { box.appendChild(element('p', 'warning', 'This touches a sensitive file or a location that can run code.')); }
 		if (event.detail) { box.appendChild(element('code', 'command', event.detail)); }
 		const buttons = element('div', 'row');
@@ -217,7 +273,6 @@
 			buttons.appendChild(button);
 		});
 		box.appendChild(buttons);
-		card.appendChild(box);
 		scroll();
 	}
 
@@ -272,6 +327,7 @@
 		switch (event.type) {
 			case 'user': {
 				endAssistant();
+				activity = null;
 				liveChars = 0;
 				const box = add(element('div', 'message user', event.text));
 				(event.attachments || []).forEach(a => {
@@ -303,18 +359,15 @@
 				break;
 			case 'toolStart': {
 				endAssistant();
-				const card = add(toolCard(event.summary));
-				tools.set(event.callId, card);
+				startTool(event);
 				break;
 			}
 			case 'permission':
 				showPermission(event);
 				break;
-			case 'toolEnd': {
-				const card = tools.get(event.callId);
-				if (card) { finishTool(card, event.ok, event.output); }
+			case 'toolEnd':
+				endTool(event.callId, event.ok, event.output);
 				break;
-			}
 			case 'usage': {
 				if (event.usage.model && state.model === 'auto') { $('model').title = 'Routed to ' + event.usage.model; }
 				if (event.usage.model) { state.liveModel = event.usage.model; }
@@ -520,6 +573,7 @@
 	function drawTranscript(items) {
 		endAssistant();
 		tools.clear();
+		activity = null;
 		transcript.replaceChildren();
 		items.forEach(item => {
 			if (item.kind === 'user') {
@@ -535,9 +589,15 @@
 			} else if (item.kind === 'assistant') {
 				add(element('div', 'message assistant')).innerHTML = render(item.text);
 			} else {
-				finishTool(add(toolCard(item.summary)), item.ok, item.output);
+				// Restored chat: collapse each tool back into a compact group, not a wall of boxes.
+				const group = ensureActivity();
+				const entry = element('div', 'activity-item ' + (item.ok ? 'ok' : 'failed'));
+				entry.appendChild(element('span', 'verb', item.summary));
+				entry.appendChild(element('pre', 'output')).textContent = item.output;
+				group.querySelector('.activity-list').appendChild(entry);
 			}
 		});
+		if (activity) { activity.open = false; activitySummary(); activity = null; }
 	}
 
 	function showSetup(open) {

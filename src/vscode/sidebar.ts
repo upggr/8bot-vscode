@@ -451,6 +451,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				event: {
 					type: 'permission',
 					callId: request.callId,
+					tool: request.tool,
 					summary: request.summary,
 					detail: request.tool === 'run_command' ? String(request.args.command) : undefined,
 					sensitive: request.kind === 'sensitiveRead' || request.kind === 'sensitiveEdit',

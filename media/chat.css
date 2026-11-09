@@ -113,17 +113,28 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; backgro
 .code pre { margin: 0; padding: 8px; overflow-x: auto; background: var(--vscode-textCodeBlock-background); }
 .code code { padding: 0; }
 .copy { position: absolute; top: 4px; right: 4px; padding: 1px 6px; font-size: 0.85em; opacity: 0.8; }
-/* Quiet tool pills, in the spirit of the Claude plugin: a one-line summary, output on demand. */
-.tool, .reasoning { font-size: 0.88em; }
-.tool summary, .reasoning summary { cursor: pointer; overflow-wrap: anywhere; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; list-style: none; color: var(--vscode-descriptionForeground); background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
-.tool summary::-webkit-details-marker, .reasoning summary::-webkit-details-marker { display: none; }
-.tool summary::before { content: ''; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--vscode-descriptionForeground); opacity: 0.5; }
-.tool.running summary::before { background: var(--vscode-progressBar-background); opacity: 1; animation: pulse 1.1s ease-in-out infinite; }
-.tool.ok summary::before { background: var(--vscode-testing-iconPassed); opacity: 1; }
-.tool.failed summary::before { background: var(--vscode-errorForeground); opacity: 1; }
-.tool summary:hover, .reasoning summary:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
+/* Tool activity, batched into one quiet group like the Claude plugin: a single
+   "Working…" line while running, folding to "N actions" afterwards. */
+.activity { font-size: 0.88em; }
+.activity summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; list-style: none; color: var(--vscode-descriptionForeground); background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
+.activity summary::-webkit-details-marker { display: none; }
+.activity summary:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
+.activity-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 2px; padding-left: 4px; border-left: 2px solid var(--vscode-panel-border); }
+.activity-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 4px 2px 8px; color: var(--vscode-descriptionForeground); }
+.activity-item .verb { font-weight: 600; color: var(--vscode-foreground); }
+.activity-item .target { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 100%; }
+.activity-item.running .verb::before { content: '● '; color: var(--vscode-progressBar-background); animation: pulse 1.1s ease-in-out infinite; }
+.activity-item.ok .verb::before { content: '✓ '; color: var(--vscode-testing-iconPassed); }
+.activity-item.failed .verb::before { content: '✗ '; color: var(--vscode-errorForeground); }
+.activity-item .output { flex-basis: 100%; margin: 2px 0 4px; max-height: 180px; }
+.reasoning { font-size: 0.88em; }
+.reasoning summary { cursor: pointer; overflow-wrap: anywhere; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; list-style: none; color: var(--vscode-descriptionForeground); background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
+.reasoning summary::-webkit-details-marker { display: none; }
+.reasoning summary:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
 .output { margin: 6px 0 4px 14px; max-height: 240px; overflow: auto; white-space: pre-wrap; font-family: var(--vscode-editor-font-family); font-size: 0.9em; color: var(--vscode-descriptionForeground); border-left: 2px solid var(--vscode-panel-border); padding-left: 8px; }
-.permission { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
-.permission p { margin: 0; }
-.permission .warning { color: var(--vscode-editorWarning-foreground); }
+/* An approval prompt stands apart so it is easy to act on, like Claude's permission card. */
+.permission-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--vscode-input-background); border: 1px solid var(--vscode-editorWarning-foreground); }
+.permission-card .perm-title { font-weight: 600; overflow-wrap: anywhere; }
+.permission-card p { margin: 0; }
+.permission-card .warning { color: var(--vscode-editorWarning-foreground); }
 .command { display: block; padding: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }

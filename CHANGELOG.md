@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.18
+
+- Tool calls no longer flood the chat: a run of reads, edits and commands collapses into a single quiet group. While the agent works it shows "Working… 2/5", and when it finishes it folds to "5 actions" — expand it any time to see each step and its output. Approval prompts stand apart on their own card so they are easy to act on.
+
 ## 0.1.17
 
 - A cleaner, calmer chat in the spirit of the Claude plugin: one rounded composer holds your message, attachments and the model picker, and the busy status now has a spinner. Tool calls and thinking collapse into quiet one-line pills instead of big boxes.
