@@ -426,6 +426,59 @@ test('agent asks in default mode, runs the tool and feeds back the result', asyn
 	} finally { clean(); }
 });
 
+test('the agent can spawn a sub-agent that runs tools and returns a result', async () => {
+	const { root, clean } = workspace();
+	try {
+		const events: AgentEvent[] = [];
+		let subRan = false;
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				const last = request.messages.at(-1);
+				const lastText = last && typeof last.content === 'string' ? last.content : '';
+				// The sub-agent's fresh conversation carries the task as its only user message.
+				if (last?.role === 'user' && lastText.includes('read note.txt')) {
+					subRan = true;
+					yield call('s1', 'read_file', { path: 'note.txt' });
+					return;
+				}
+				if (last?.role === 'tool' && last.tool_call_id === 's1') {
+					yield say('The file says hello.');
+					return;
+				}
+				// Main agent: spawn the sub-agent once, then finish.
+				if (last?.role === 'user') {
+					yield call('m1', 'spawn_agent', { task: 'read note.txt and report it', name: 'read note' });
+					return;
+				}
+				yield say('main done');
+			},
+		};
+		fs.writeFileSync(path.join(root, 'note.txt'), 'hello');
+		// Depth 1 lets the main agent spawn but stops the sub-agent from nesting further.
+		const opts = { ...agentOptions(stream, root, 'default', 'allow', events), spawnDepth: 1 };
+		await runAgent(opts);
+		assert.ok(subRan, 'sub-agent ran');
+		const spawnEnd = events.find(e => e.type === 'toolEnd' && e.callId === 'm1') as { ok: boolean; output: string } | undefined;
+		assert.ok(spawnEnd && spawnEnd.ok, 'spawn_agent succeeded');
+		assert.match(spawnEnd?.output ?? '', /hello/, 'sub-agent result fed back to the main agent');
+		// Sub-agent's inner tool calls are re-emitted namespaced under the parent call.
+		assert.ok(events.some(e => e.type === 'toolStart' && String(e.callId).startsWith('m1:')), 'sub-agent activity surfaced');
+	} finally { clean(); }
+});
+
+test('spawn_agent is refused when the depth limit is reached', async () => {
+	const { root, clean } = workspace();
+	try {
+		const events: AgentEvent[] = [];
+		const stream = scripted([[call('m1', 'spawn_agent', { task: 'x' })], [say('done')]]);
+		const opts = { ...agentOptions(stream, root, 'default', 'allow', events), spawnDepth: 0 };
+		await runAgent(opts);
+		const spawnEnd = events.find(e => e.type === 'toolEnd' && e.callId === 'm1') as { ok: boolean; output: string } | undefined;
+		assert.ok(spawnEnd && !spawnEnd.ok, 'refused at depth 0');
+		assert.match(spawnEnd?.output ?? '', /disabled|nesting limit/);
+	} finally { clean(); }
+});
+
 test('denied and plan-mode actions never touch the disk', async () => {
 	const { root, clean } = workspace();
 	try {

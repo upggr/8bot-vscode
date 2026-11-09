@@ -474,6 +474,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				contextWindow: info?.contextWindow,
 				supportsTools: info?.supportsTools,
 				showGuardNotices: services.config.get<boolean>('showGuardNotices', false),
+				spawnDepth: services.config.get<boolean>('subagents', true) ? 2 : 0,
 				getMode: () => services.mode,
 				requestPermission: request => this.requestPermission(request, abort.signal),
 				onEvent: event => this.onAgentEvent(event),

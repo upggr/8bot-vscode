@@ -30,7 +30,7 @@
 	// so a long run of commands does not flood the transcript.
 	let activity = null;
 	const tools = new Map();
-	const TOOL_VERBS = { read_file: 'Read', search_text: 'Searched', list_files: 'Listed', edit_file: 'Edited', write_file: 'Wrote', run_command: 'Ran', save_memory: 'Saved memory', web_search: 'Searched the web', fetch_url: 'Fetched' };
+	const TOOL_VERBS = { read_file: 'Read', search_text: 'Searched', list_files: 'Listed', edit_file: 'Edited', write_file: 'Wrote', run_command: 'Ran', save_memory: 'Saved memory', web_search: 'Searched the web', fetch_url: 'Fetched', spawn_agent: 'Spawned' };
 
 	function verbFor(toolName, summary) {
 		const verb = TOOL_VERBS[toolName];

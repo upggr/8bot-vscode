@@ -48,8 +48,28 @@ export interface AgentOptions {
 	memoryFile?: string;
 	/** Answers remembered with "always". Pass the same set across a conversation. */
 	remembered?: Set<string>;
+	/** Upper bound for how deep sub-agents may spawn their own sub-agents (0 disables spawning). */
+	spawnDepth?: number;
 	signal?: AbortSignal;
 }
+
+/** Tool the model can call to hand a focused subtask to a fresh sub-agent. */
+const SPAWN_TOOL = 'spawn_agent';
+const SPAWN_SCHEMA = {
+	type: 'function',
+	function: {
+		name: SPAWN_TOOL,
+		description: 'Spawn a sub-agent to handle a focused, self-contained subtask with its own fresh context. Use it for parallelizable or exploratory work (research a question, find usages, draft an isolated change) so the main conversation stays focused. The sub-agent can use tools and returns a concise result. Give it complete instructions; it does not see this conversation.',
+		parameters: {
+			type: 'object',
+			properties: {
+				task: { type: 'string', description: 'Complete, self-contained instructions for the sub-agent.' },
+				name: { type: 'string', description: 'A short label for the subtask, e.g. "find usages".' },
+			},
+			required: ['task'],
+		},
+	},
+} as const;
 
 const COMPACT_PROMPT = 'Summarize this conversation so work can continue from the summary alone. Include the user\'s goals and exact requests, decisions made, files changed, errors and how they were solved, the current state, and the next step. Output only the summary.';
 const MIN_TURNS_BETWEEN_COMPACTIONS = 3;
@@ -60,8 +80,8 @@ const CONTINUE_PROMPT = 'Continue with the task. Use a tool or give your respons
 /** Models where marking the latest message for caching has been verified to work. */
 const CONVERSATION_CACHE_MODELS = /claude/i;
 
-export function toolSchemas() {
-	return TOOLS.map(t => t.schema);
+export function toolSchemas(spawnDepth = 0) {
+	return spawnDepth > 0 ? [...TOOLS.map(t => t.schema), SPAWN_SCHEMA] : TOOLS.map(t => t.schema);
 }
 
 /**
@@ -96,7 +116,7 @@ export function withCacheMarkers(system: string, messages: ChatMessage[], model:
 export async function runAgent(options: AgentOptions): Promise<void> {
 	const { client, messages, signal, onEvent } = options;
 	const remembered = options.remembered ?? new Set<string>();
-	const tools = options.supportsTools === false ? undefined : toolSchemas();
+	const tools = options.supportsTools === false ? undefined : toolSchemas(options.spawnDepth ?? 0);
 	const overhead = Math.ceil((options.systemPrompt.length + JSON.stringify(tools ?? []).length) / 4);
 	let contextWindow = options.contextWindow;
 	let calibration = 1;
@@ -235,6 +255,9 @@ async function executeCall(call: ToolCall, options: AgentOptions, remembered: Se
 	} catch {
 		return report(onEvent, call.id, name, {}, name, false, `The arguments for ${name} were not valid JSON. The output may have been cut off. Try again with a smaller change.`);
 	}
+	if (name === SPAWN_TOOL) {
+		return runSubagent(call.id, args, options, remembered);
+	}
 	const tool = findTool(name);
 	if (!tool) {
 		return report(onEvent, call.id, name, args, name, false, `Unknown tool: ${name}`);
@@ -268,6 +291,50 @@ async function executeCall(call: ToolCall, options: AgentOptions, remembered: Se
 	} catch (error) {
 		return finish(onEvent, call.id, false, `Error: ${(error as Error).message}`);
 	}
+}
+
+const SUBAGENT_MAX_TURNS = 12;
+const SUBAGENT_CHARS = 12_000;
+
+/** Runs a focused sub-agent with its own fresh conversation and returns its final answer. */
+async function runSubagent(callId: string, args: Record<string, unknown>, options: AgentOptions, remembered: Set<string>): Promise<string> {
+	const { onEvent } = options;
+	const task = typeof args.task === 'string' ? args.task.trim() : '';
+	const label = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : 'subtask';
+	if (!task) { return report(onEvent, callId, SPAWN_TOOL, args, 'spawn sub-agent', false, 'The sub-agent needs a task.'); }
+	if ((options.spawnDepth ?? 0) <= 0) {
+		return report(onEvent, callId, SPAWN_TOOL, args, `Sub-agent: ${label}`, false, 'Sub-agent spawning is disabled or the nesting limit was reached.');
+	}
+	onEvent({ type: 'toolStart', callId, tool: SPAWN_TOOL, summary: `Sub-agent: ${label}`, args });
+	const systemPrompt = [
+		'You are a focused sub-agent helping with one subtask inside a larger coding session.',
+		'Complete the task below using the available tools, then reply with a concise result: what you found or did, and any file paths involved.',
+		'Do not ask questions; make reasonable assumptions and finish.',
+		'',
+		`Subtask: ${task}`,
+	].join('\n');
+	const messages: ChatMessage[] = [{ role: 'user', content: task }];
+	let result = '';
+	try {
+		await runAgent({
+			...options,
+			systemPrompt,
+			messages,
+			maxTurns: SUBAGENT_MAX_TURNS,
+			spawnDepth: (options.spawnDepth ?? 1) - 1,
+			onEvent: event => {
+				if (event.type === 'text') { result += event.text; }
+				// Re-emit sub-agent progress so the UI can group it, tagged with the parent call.
+				if (event.type === 'toolStart' || event.type === 'toolEnd') { onEvent({ ...event, callId: `${callId}:${event.callId}` }); }
+			},
+		});
+	} catch (error) {
+		if (options.signal?.aborted) { return finish(onEvent, callId, false, 'Stopped by the user.'); }
+		return finish(onEvent, callId, false, `Sub-agent error: ${(error as Error).message}`);
+	}
+	const trimmed = result.trim();
+	const output = trimmed.length > SUBAGENT_CHARS ? trimmed.slice(0, SUBAGENT_CHARS) + '\n[... truncated ...]' : trimmed;
+	return finish(onEvent, callId, true, output || 'The sub-agent finished without a written result.');
 }
 
 async function previewOf(tool: Tool, args: Record<string, unknown>, context: ToolContext) {

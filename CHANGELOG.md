@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.27
+
+- **Sub-agents:** the model can spawn a focused sub-agent for a self-contained subtask (`spawn_agent`) — research a question, find usages, draft an isolated change — with its own fresh context and tools, then fold the concise result back into the main conversation. Sub-agent tool activity shows nested under the parent step, nesting is depth-limited, it honors your permission mode and Stop, and you can turn it off with `eightbot.subagents`.
+
 ## 0.1.26
 
 - **Fixed the uninterruptible stream:** if the SSE connection stalled mid-read (no bytes, no close), Stop did nothing because the stream read never listened to the abort signal. The reader now cancels the moment you press Stop, and the agent breaks out of streaming as soon as it's aborted — so a wedged model can always be interrupted.
