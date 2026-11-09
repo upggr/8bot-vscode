@@ -695,6 +695,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		<button id="newChat" class="icon" type="button" title="New chat" aria-label="New chat">+</button>
 	</header>
 	<div id="transcript" role="log" aria-live="polite"></div>
+	<div id="queue" hidden></div>
 	<footer>
 		<div class="composer">
 			<label id="selectionChip" class="chip attach-chip" hidden><span class="at" aria-hidden="true">@</span><input id="includeSelection" type="checkbox" checked aria-label="Include the editor selection"><span id="selectionText"></span></label>
@@ -713,7 +714,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 		</div>
 		<div id="suggestions" hidden></div>
 		<div id="status" class="muted" role="status" hidden></div>
-		<div id="queue" hidden></div>
 		<details id="advanced"><summary>Options <span id="modeBadge" class="chip" hidden></span><span id="effortBadge" class="chip" hidden></span><span id="credits" class="chip credits-chip"></span></summary>
 			<div id="effortWrap" hidden><span class="opt-label">Reasoning</span><div id="effort" class="segmented" role="group" aria-label="Reasoning effort"></div></div>
 			<div><span class="opt-label">Permissions</span><div id="mode" class="segmented" role="group" aria-label="Permission mode"></div></div>

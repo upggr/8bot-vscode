@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.24
+
+- Queued messages now sit right under the chat transcript (just above the input) instead of down by the status line, so they read as part of the conversation.
+
 ## 0.1.23
 
 - Fixed a misleading "74s quiet" status during long thinking streams: the idle timer now resets as tokens arrive, so while the model streams it shows "Ns since last token" instead of implying a dead stream. Raised the default hang timeout to 240s (slow thinking models can pause a couple of minutes between tokens) so legitimate slow replies are not cut off.
