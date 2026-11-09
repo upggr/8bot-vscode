@@ -18,6 +18,14 @@
 	let lastActivity = Date.now();
 	let awaitingApproval = false;
 	let statusTimer;
+	let incantation = 0;
+	// Dark sorcery waiting phrases, cycled while the agent works — a grim twist on Claude's playful verbs.
+	const INCANTATIONS = [
+		'Summoning the spirits', 'Consulting the void', 'Reading the runes', 'Brewing the answer',
+		'Casting the incantation', 'Whispering to the machine', 'Divining the diff', 'Binding the tokens',
+		'Channeling the dark arts', 'Scrying the codebase', 'Transmuting errors', 'Raising the dead code',
+		'Deciphering the grimoire', 'Piercing the veil', 'Stirring the cauldron', 'Unmaking the bug',
+	];
 	// Tool calls for the current assistant turn, batched into one collapsible group
 	// so a long run of commands does not flood the transcript.
 	let activity = null;
@@ -55,8 +63,8 @@
 		const open = activity.open;
 		const summary = activity.querySelector('summary');
 		summary.textContent = running > 0
-			? 'Working… ' + (total - running + 1) + '/' + total
-			: total === 1 ? '1 action' : total + ' actions';
+			? 'Weaving… ' + (total - running + 1) + '/' + total
+			: total === 1 ? '1 rite performed' : total + ' rites performed';
 		if (running === 0 && open) { activity.open = false; }
 	}
 
@@ -297,9 +305,9 @@
 		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
 		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
 		let base;
-		if (awaitingApproval) { base = 'Waiting for your approval'; }
-		else if (liveChars) { base = seconds > 2 ? 'Working… ' + seconds + 's quiet' : 'Working…'; }
-		else { base = seconds < 3 ? 'Working…' : seconds < 30 ? 'Waiting for the model… ' + seconds + 's' : 'Still waiting for the model (' + seconds + 's) — press Stop if it seems stuck'; }
+		if (awaitingApproval) { base = '⚠ Awaiting your blessing (approval)'; }
+		else if (liveChars) { base = seconds > 2 ? INCANTATIONS[incantation] + '… ' + seconds + 's quiet' : INCANTATIONS[incantation] + '…'; }
+		else { base = seconds < 30 ? INCANTATIONS[incantation] + '… ' + seconds + 's' : 'The spirits are silent (' + seconds + 's) — press Stop to break the spell'; }
 		const liveTokens = Math.ceil(liveChars / 4);
 		const rate = costRates.get(state.liveModel || state.model);
 		const estimate = liveChars && rate ? ' (~$' + (liveTokens * rate).toFixed(6) + ')' : '';
@@ -310,7 +318,14 @@
 	function updateStatusTimer() {
 		if (state.busy && !statusTimer) {
 			lastActivity = Date.now();
-			statusTimer = setInterval(renderStatus, 1000);
+			incantation = Math.floor(Math.random() * INCANTATIONS.length);
+			statusTimer = setInterval(() => {
+				// Drift to a new dark phrase every few seconds while it works.
+				if (Math.floor((Date.now() - lastActivity) / 1000) % 4 === 0 && Math.random() < 0.3) {
+					incantation = (incantation + 1) % INCANTATIONS.length;
+				}
+				renderStatus();
+			}, 1000);
 		} else if (!state.busy && statusTimer) {
 			clearInterval(statusTimer);
 			statusTimer = undefined;

@@ -227,11 +227,11 @@ test('a busy chat shows live progress and approval waits', () => {
 	const { send, $, dom } = load();
 	send({ ...STATE, busy: true });
 	assert.equal($('status').hidden, false);
-	assert.match($('status').textContent ?? '', /Working/);
+	assert.match($('status').textContent ?? '', /…/);
 	send({ type: 'event', event: { type: 'permission', callId: 'x', summary: 's' } });
-	assert.match($('status').textContent ?? '', /approval/);
+	assert.match($('status').textContent ?? '', /blessing/);
 	send({ type: 'event', event: { type: 'toolEnd', callId: 'x', ok: true, output: '' } });
-	assert.match($('status').textContent ?? '', /Working/);
+	assert.match($('status').textContent ?? '', /…/);
 	send({ ...STATE, busy: false });
 	assert.equal($('status').hidden, true);
 	dom.window.close();
@@ -265,7 +265,7 @@ test('tool calls batch into one collapsed activity group instead of many boxes',
 	// When the turn ends the group folds to a quiet summary, not an open list.
 	send({ type: 'event', event: { type: 'text', text: 'Done.' } });
 	assert.equal((groups[0] as HTMLDetailsElement).open, false);
-	assert.match(groups[0].querySelector('summary')?.textContent ?? '', /3 actions/);
+	assert.match(groups[0].querySelector('summary')?.textContent ?? '', /3 rites performed/);
 	dom.window.close();
 });
 
