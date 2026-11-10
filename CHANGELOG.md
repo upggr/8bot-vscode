@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.29
+
+- **Spend limits reached are detected properly:** the gateway documents HTTP 422 as "spend limit exceeded", so that status is now reported as a limit (with the subscription link) instead of a generic error.
+- **Honest cost wording.** Probing the gateway showed its per-request `cost` is metered at list rates and does not match what 8os bills, so the chip now reads `~$x metered` and `/cost` says so, pointing at Usage and spend in the 8os portal for real figures.
+- Fixed the stream idle timeout falling back to 90s in code while the setting's default was 240s.
+
 ## 0.1.28
 
 - Locally counted spend is now labelled as an estimate (`~$6.12 this month (est.)`) in the chat chip, the status bar and `/cost`, and the hover explains that the estimate runs a bit high and is being worked on. Live Pax8 limits are unchanged, since those numbers come from the account and are accurate.

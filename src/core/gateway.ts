@@ -291,7 +291,8 @@ export class GatewayClient implements ChatStreamer {
 		const { code, message } = parseError(text);
 		if (code && SUSPENSION_MESSAGES[code]) { return new GatewayError(SUSPENSION_MESSAGES[code], status, code); }
 		if (status === 401) { return new GatewayError('The gateway rejected your API key (401). Run "8bot: Set API Key".', status, code); }
-		const limitReached = status === 402 || ((status === 403 || status === 429) && LIMIT_TEXT.test(`${code ?? ''} ${message}`));
+		// The gateway documents 422 as "spend limit exceeded"; 402 and limit-flavoured 403/429 mean the same.
+		const limitReached = status === 402 || status === 422 || ((status === 403 || status === 429) && LIMIT_TEXT.test(`${code ?? ''} ${message}`));
 		if (limitReached) { return new GatewayError(`Your gateway spending or usage limit has been reached. ${this.redact(message).slice(0, 300)}`.trim(), status, code, true); }
 		return new GatewayError(`Gateway error ${status}: ${this.redact(message).slice(0, 500)}`, status, code);
 	}

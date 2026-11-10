@@ -20,8 +20,11 @@ export interface CreditStatus {
 }
 
 const LOW_RATIO = 0.1;
-/** Local totals come from per-request gateway costs, which currently read high. Say so until it is fixed. */
-const ESTIMATE_NOTE = 'This estimate is known to run a bit high — we are working on making it accurate.';
+/**
+ * Local totals add up the `cost` the gateway reports per request. That figure is computed at
+ * list rates and does not match what 8os actually bills, so it is only ever an indication.
+ */
+const ESTIMATE_NOTE = 'This adds up the cost the gateway reports per request, which is metered at list rates and does not match your bill. Check the Usage and spend page in the 8os portal for real figures.';
 
 export function currentMonth(now = new Date()): string {
 	return now.toISOString().slice(0, 7);
@@ -62,14 +65,14 @@ export function creditStatus(record: SpendRecord | undefined, userLimit: number,
 		const remaining = Math.max(userLimit - spent, 0);
 		return {
 			label: `~${money(remaining)} left (est.)`,
-			detail: `Estimated: ${money(spent)} of your ${money(userLimit)} monthly limit, counted on this computer from gateway costs, for this key only. ${ESTIMATE_NOTE}`,
+			detail: `About ${money(spent)} of your own ${money(userLimit)} monthly limit, metered on this computer for this key only. ${ESTIMATE_NOTE}`,
 			level: level(remaining, userLimit),
 			live: false,
 		};
 	}
 	return {
-		label: `~${money(spent)} this month (est.)`,
-		detail: `Estimated usage, counted on this computer from gateway costs, for the current key only. API keys cannot read the account balance, so connect a Pax8 account or set a monthly limit to see what is left. ${ESTIMATE_NOTE}`,
+		label: `~${money(spent)} metered`,
+		detail: `Metered this month on this computer, for the current key only. ${ESTIMATE_NOTE}`,
 		level: 'ok',
 		live: false,
 	};

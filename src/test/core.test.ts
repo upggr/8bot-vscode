@@ -210,6 +210,13 @@ test('a spending limit is not retried and is marked as reached', async () => {
 	await assert.rejects(collect(client().streamChat({ model: 'm', messages: [] })), (e: GatewayError) => e.limitReached && calls === 1);
 });
 
+test('a 422 spend limit is reported as the limit being reached', async () => {
+	// The gateway documents 422 as "spend limit exceeded", with no limit wording needed.
+	let calls = 0;
+	handler = (_req, res) => { calls++; res.writeHead(422).end(JSON.stringify({ error: { message: 'Spend limit exceeded' } })); };
+	await assert.rejects(collect(client().streamChat({ model: 'm', messages: [] })), (e: GatewayError) => e.limitReached && calls === 1);
+});
+
 test('explains suspended keys', async () => {
 	handler = (_req, res) => res.writeHead(403).end(JSON.stringify({ error: { code: 'KEY_DISABLED', type: 'permission_error', message: 'no' } }));
 	await assert.rejects(collect(client().streamChat({ model: 'm', messages: [] })), /disabled/);
@@ -271,9 +278,9 @@ test('local credits reset each month and show what is left', () => {
 	// Locally counted totals are labelled as estimates, since they read a little high.
 	assert.equal(creditStatus(record, 5, undefined, october).label, '~$2.00 left (est.)');
 	assert.equal(creditStatus(record, 3, undefined, october).level, 'empty');
-	assert.equal(creditStatus(record, 0, undefined, october).label, '~$3.00 this month (est.)');
+	assert.equal(creditStatus(record, 0, undefined, october).label, '~$3.00 metered');
 	assert.equal(creditStatus(record, 5, undefined, november).label, '~$5.00 left (est.)');
-	assert.match(creditStatus(record, 0, undefined, october).detail, /working on making it accurate/);
+	assert.match(creditStatus(record, 0, undefined, october).detail, /does not match your bill/);
 });
 
 test('local spend is tracked per key so a key switch does not mix accounts', () => {
@@ -281,9 +288,9 @@ test('local spend is tracked per key so a key switch does not mix accounts', () 
 	const firstKey = addSpend(addSpend(undefined, 10, now, 'sk-pax8-'), 5, now, 'sk-pax8-');
 	assert.equal(firstKey.total, 15);
 	// The same record read as another key shows nothing, and a spend on the other key starts over.
-	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax9-').label, '~$0.00 this month (est.)');
+	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax9-').label, '~$0.00 metered');
 	assert.equal(addSpend(firstKey, 2, now, 'sk-pax9-').total, 2);
-	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax8-').label, '~$15.00 this month (est.)');
+	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax8-').label, '~$15.00 metered');
 });
 
 test('live limits show the reported currency', () => {

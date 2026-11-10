@@ -588,7 +588,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 			if (s.reasoningTokens) { parts.push(`${s.reasoningTokens.toLocaleString()} reasoning`); }
 			lines.push(`- \`${model}\`: **$${s.cost.toFixed(6)}** (${parts.join(', ')})`);
 		}
-		lines.push('', `**Total: $${total.toFixed(6)}**`);
+		lines.push('', `**Total metered: $${total.toFixed(6)}**`);
+		lines.push('', '_These are the costs the gateway reports per request, metered at list rates. They do not match what 8os bills — see Usage and spend in the 8os portal for real figures._');
 		return lines.join('\n');
 	}
 
