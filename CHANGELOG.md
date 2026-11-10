@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.28
+
+- Locally counted spend is now labelled as an estimate (`~$6.12 this month (est.)`) in the chat chip, the status bar and `/cost`, and the hover explains that the estimate runs a bit high and is being worked on. Live Pax8 limits are unchanged, since those numbers come from the account and are accurate.
+
 ## 0.1.27
 
 - **Sub-agents:** the model can spawn a focused sub-agent for a self-contained subtask (`spawn_agent`) — research a question, find usages, draft an isolated change — with its own fresh context and tools, then fold the concise result back into the main conversation. Sub-agent tool activity shows nested under the parent step, nesting is depth-limited, it honors your permission mode and Stop, and you can turn it off with `eightbot.subagents`.

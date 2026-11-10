@@ -268,10 +268,12 @@ test('local credits reset each month and show what is left', () => {
 	const record = addSpend(addSpend(undefined, 1, october), 2, october);
 	assert.equal(record.total, 3);
 	assert.equal(addSpend(record, 1, november).total, 1);
-	assert.equal(creditStatus(record, 5, undefined, october).label, '$2.00 left');
+	// Locally counted totals are labelled as estimates, since they read a little high.
+	assert.equal(creditStatus(record, 5, undefined, october).label, '~$2.00 left (est.)');
 	assert.equal(creditStatus(record, 3, undefined, october).level, 'empty');
-	assert.equal(creditStatus(record, 0, undefined, october).label, '$3.00 this month');
-	assert.equal(creditStatus(record, 5, undefined, november).label, '$5.00 left');
+	assert.equal(creditStatus(record, 0, undefined, october).label, '~$3.00 this month (est.)');
+	assert.equal(creditStatus(record, 5, undefined, november).label, '~$5.00 left (est.)');
+	assert.match(creditStatus(record, 0, undefined, october).detail, /working on making it accurate/);
 });
 
 test('local spend is tracked per key so a key switch does not mix accounts', () => {
@@ -279,9 +281,9 @@ test('local spend is tracked per key so a key switch does not mix accounts', () 
 	const firstKey = addSpend(addSpend(undefined, 10, now, 'sk-pax8-'), 5, now, 'sk-pax8-');
 	assert.equal(firstKey.total, 15);
 	// The same record read as another key shows nothing, and a spend on the other key starts over.
-	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax9-').label, '$0.00 this month');
+	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax9-').label, '~$0.00 this month (est.)');
 	assert.equal(addSpend(firstKey, 2, now, 'sk-pax9-').total, 2);
-	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax8-').label, '$15.00 this month');
+	assert.equal(creditStatus(firstKey, 0, undefined, now, 'sk-pax8-').label, '~$15.00 this month (est.)');
 });
 
 test('live limits show the reported currency', () => {
