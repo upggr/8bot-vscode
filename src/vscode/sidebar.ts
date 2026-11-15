@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { Attachment, ATTACHMENTS_OPEN, buildAttachedContent, canReadImages, MAX_ATTACHMENTS } from '../core/attachments';
 import { Checkpoints } from '../core/checkpoints';
 import { SUMMARY_PREFIX, estimateTokens, outputTokenLimit } from '../core/context';
-import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent } from '../core/agent';
+import { AgentEvent, compact, PermissionAnswer, PermissionRequest, runAgent, SUBAGENT_MAX_TURNS, subagentEffort } from '../core/agent';
 import { BUY_URL } from '../core/credits';
 import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError } from '../core/gateway';
@@ -475,6 +475,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Text
 				supportsTools: info?.supportsTools,
 				showGuardNotices: services.config.get<boolean>('showGuardNotices', false),
 				spawnDepth: services.config.get<boolean>('subagents', true) ? 2 : 0,
+				subagentMaxTurns: services.config.get<number>('subagentMaxTurns', SUBAGENT_MAX_TURNS),
+				subagentReasoningEffort: subagentEffort(services.config.get<string>('subagentReasoningEffort', 'low'), info?.reasoningEfforts),
 				getMode: () => services.mode,
 				requestPermission: request => this.requestPermission(request, abort.signal),
 				onEvent: event => this.onAgentEvent(event),

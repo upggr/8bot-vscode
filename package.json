@@ -2,7 +2,7 @@
   "name": "8bot-vscode",
   "displayName": "8bot: AI Coding Agent for the 8os Gateway (Unofficial)",
   "description": "Unofficial AI coding agent and chat for VS Code using your Pax8 8os Agent Gateway API key: sidebar chat, @8bot in VS Code Chat, model selection, file edits, terminal commands and permission modes.",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "publisher": "IoannisKokkinis",
   "author": {
     "name": "Ioannis Kokkinis",
@@ -299,6 +299,42 @@
           "default": true,
           "scope": "application",
           "description": "Let the model spawn focused sub-agents for self-contained subtasks (research, finding usages, isolated changes). Sub-agents use tools and report a concise result."
+        },
+        "eightbot.subagentMaxTurns": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 200,
+          "scope": "application",
+          "description": "Model turns each sub-agent gets. A sub-agent that runs out reports what it found so far, marked as unfinished."
+        },
+        "eightbot.subagentReasoningEffort": {
+          "type": "string",
+          "default": "low",
+          "enum": [
+            "inherit",
+            "",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "enumDescriptions": [
+            "Use the same effort as the main chat.",
+            "Use the model default.",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "scope": "application",
+          "description": "Reasoning effort for sub-agents, used only when the model supports it. Lower effort makes their many small steps much faster. \"inherit\" uses the main chat's setting."
         },
         "eightbot.followupSuggestions": {
           "type": "boolean",

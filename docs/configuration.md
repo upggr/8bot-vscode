@@ -14,6 +14,9 @@ description: Every setting for 8bot for VS Code, including gateway URL, model, p
 | `eightbot.maxTurns` | `200` | Model turns per request |
 | `eightbot.maxOutputTokens` | `0` | Output limit per turn. 0 uses up to 32,000 tokens or the model's maximum |
 | `eightbot.commandTimeoutSeconds` | `120` | Default command timeout |
+| `eightbot.subagents` | `true` | Let the model start sub-agents for self-contained subtasks |
+| `eightbot.subagentMaxTurns` | `40` | Model turns each sub-agent gets |
+| `eightbot.subagentReasoningEffort` | `low` | Reasoning effort for sub-agents. `inherit` uses the main chat's |
 | `eightbot.customInstructions` | empty | Added to every conversation |
 | `eightbot.monthlySpendLimit` | `0` | Your own monthly limit in USD |
 | `eightbot.pax8ClientId` | empty | Client account for live limits |

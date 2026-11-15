@@ -50,6 +50,10 @@ export interface AgentOptions {
 	remembered?: Set<string>;
 	/** Upper bound for how deep sub-agents may spawn their own sub-agents (0 disables spawning). */
 	spawnDepth?: number;
+	/** Model turns each sub-agent gets. Defaults to SUBAGENT_MAX_TURNS. */
+	subagentMaxTurns?: number;
+	/** Reasoning effort for sub-agents. Undefined inherits the parent's; an empty string uses the model default. */
+	subagentReasoningEffort?: string;
 	signal?: AbortSignal;
 }
 
@@ -59,7 +63,7 @@ const SPAWN_SCHEMA = {
 	type: 'function',
 	function: {
 		name: SPAWN_TOOL,
-		description: 'Spawn a sub-agent to handle a focused, self-contained subtask with its own fresh context. Use it for parallelizable or exploratory work (research a question, find usages, draft an isolated change) so the main conversation stays focused. The sub-agent can use tools and returns a concise result. Give it complete instructions; it does not see this conversation.',
+		description: 'Spawn a sub-agent to handle a focused, self-contained subtask with its own fresh context. Use it for parallelizable or exploratory work (research a question, find usages, draft an isolated change) so the main conversation stays focused. Sub-agents spawned in the same turn run at the same time, so start independent ones together and do not let two of them edit the same file. Each has a limited number of turns: keep its task small enough to finish, and ask it to write findings to a file as it goes. The sub-agent can use tools and returns a concise result. Give it complete instructions; it does not see this conversation.',
 		parameters: {
 			type: 'object',
 			properties: {
@@ -112,8 +116,11 @@ export function withCacheMarkers(system: string, messages: ChatMessage[], model:
 	return out;
 }
 
+/** How a run ended: the model gave its answer, it was stopped, it used up its turns, or it kept replying with nothing. */
+export type RunOutcome = 'done' | 'aborted' | 'turnLimit' | 'empty';
+
 /** Runs model turns and tools until the model finishes, is stopped, or reaches the turn limit. */
-export async function runAgent(options: AgentOptions): Promise<void> {
+export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 	const { client, messages, signal, onEvent } = options;
 	const remembered = options.remembered ?? new Set<string>();
 	const tools = options.supportsTools === false ? undefined : toolSchemas(options.spawnDepth ?? 0);
@@ -151,7 +158,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 			try {
 				await summarize(turn, 'This chat is nearing the gateway size limit, summarizing older messages.', KEEP_TOKENS_AFTER_COMPACT);
 			} catch (error) {
-				if (signal?.aborted) { return; }
+				if (signal?.aborted) { return 'aborted'; }
 				// The request can still go out, because the client leaves old content out to fit.
 				onEvent({ type: 'notice', message: `Could not summarize older messages, so some are left out of this request. ${(error as Error).message}` });
 			}
@@ -197,7 +204,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 			}
 		} catch (error) {
 			if (text) { messages.push({ role: 'assistant', content: text }); }
-			if (signal?.aborted) { return; }
+			if (signal?.aborted) { return 'aborted'; }
 			if (!text && !recovered && looksLikeOverflow(error, estimate * calibration, contextWindow)) {
 				recovered = true;
 				if (await summarize(turn, 'The request was too large, summarizing older messages and retrying.')) {
@@ -210,7 +217,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 
 		if (signal?.aborted) {
 			if (text) { messages.push({ role: 'assistant', content: text }); }
-			return;
+			return 'aborted';
 		}
 		if (!text && calls.length === 0) {
 			if (emptyReplies < MAX_EMPTY_RETRIES) {
@@ -226,7 +233,7 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 				continue;
 			}
 			onEvent({ type: 'notice', message: `The model returned an empty response ${emptyReplies + 1} times (finish reason: ${finish || 'none'}). Send "continue" or try another model.` });
-			return;
+			return 'empty';
 		}
 		emptyReplies = 0;
 		messages.push(calls.length ? { role: 'assistant', content: text || null, tool_calls: calls } : { role: 'assistant', content: text });
@@ -234,16 +241,60 @@ export async function runAgent(options: AgentOptions): Promise<void> {
 		if (calls.length === 0) {
 			if (finish === 'length') { onEvent({ type: 'notice', message: 'The response stopped at the output token limit.' }); }
 			if (options.showGuardNotices && guardNotices > 1) { onEvent({ type: 'notice', message: `(The gateway guard flagged ${guardNotices} requests in this run.)` }); }
-			return;
+			return 'done';
 		}
 
-		for (const call of calls) {
-			const output = signal?.aborted ? 'Stopped by the user.' : await executeCall(call, options, remembered);
-			messages.push({ role: 'tool', tool_call_id: call.id, content: output });
-		}
-		if (signal?.aborted) { return; }
+		const outputs = await runCalls(calls, options, remembered);
+		calls.forEach((call, i) => messages.push({ role: 'tool', tool_call_id: call.id, content: outputs[i] }));
+		if (signal?.aborted) { return 'aborted'; }
 	}
 	onEvent({ type: 'notice', message: `Stopped after ${options.maxTurns} turns. Send "continue" to keep going.` });
+	return 'turnLimit';
+}
+
+const MAX_PARALLEL_CALLS = 6;
+
+/** Tools with no side effects, so several can run at the same time. Sub-agents check their own tools. */
+const CONCURRENT_TOOLS = new Set(['read_file', 'list_files', 'search_text', SPAWN_TOOL]);
+
+/**
+ * Runs one turn's tool calls and returns their outputs in call order. Reads and sub-agents run
+ * at the same time; edits, commands and memory changes wait for the reads before them and run
+ * one at a time, so the model still sees the effects of its calls in the order it made them.
+ */
+async function runCalls(calls: ToolCall[], options: AgentOptions, remembered: Set<string>): Promise<string[]> {
+	const outputs: string[] = new Array(calls.length);
+	const ask = serialize();
+	const run = async (i: number) => {
+		outputs[i] = options.signal?.aborted ? 'Stopped by the user.' : await executeCall(calls[i], { ...options, requestPermission: ask(options.requestPermission) }, remembered);
+	};
+	let batch: number[] = [];
+	const flush = async () => {
+		for (let start = 0; start < batch.length; start += MAX_PARALLEL_CALLS) {
+			await Promise.all(batch.slice(start, start + MAX_PARALLEL_CALLS).map(run));
+		}
+		batch = [];
+	};
+	for (let i = 0; i < calls.length; i++) {
+		if (CONCURRENT_TOOLS.has(calls[i].function.name)) {
+			batch.push(i);
+		} else {
+			await flush();
+			await run(i);
+		}
+	}
+	await flush();
+	return outputs;
+}
+
+/** Wraps permission prompts so parallel calls ask one at a time instead of stacking dialogs. */
+function serialize() {
+	let queue: Promise<unknown> = Promise.resolve();
+	return (ask: AgentOptions['requestPermission']): AgentOptions['requestPermission'] => request => {
+		const answer = queue.then(() => ask(request));
+		queue = answer.catch(() => undefined);
+		return answer;
+	};
 }
 
 async function executeCall(call: ToolCall, options: AgentOptions, remembered: Set<string>): Promise<string> {
@@ -293,8 +344,20 @@ async function executeCall(call: ToolCall, options: AgentOptions, remembered: Se
 	}
 }
 
-const SUBAGENT_MAX_TURNS = 12;
+export const SUBAGENT_MAX_TURNS = 40;
 const SUBAGENT_CHARS = 12_000;
+/** How much of a cut-off sub-agent's own transcript is replayed to write its partial report. */
+const SUBAGENT_RESCUE_CHARS = 40_000;
+const SUBAGENT_RESCUE_PROMPT = 'You ran out of turns before finishing. Using only the work below, reply now with what you found or did so far, which file paths are involved, and what is still left to do. Do not call tools.';
+
+/**
+ * Resolves the sub-agent reasoning setting for a model: "inherit" keeps the parent's effort,
+ * an effort the model lacks falls back to the model default, and empty means the model default.
+ */
+export function subagentEffort(setting: string | undefined, supported: string[] = []): string | undefined {
+	if (setting === 'inherit') { return undefined; }
+	return setting && supported.includes(setting) ? setting : '';
+}
 
 /** Runs a focused sub-agent with its own fresh conversation and returns its final answer. */
 async function runSubagent(callId: string, args: Record<string, unknown>, options: AgentOptions): Promise<string> {
@@ -306,35 +369,69 @@ async function runSubagent(callId: string, args: Record<string, unknown>, option
 		return report(onEvent, callId, SPAWN_TOOL, args, `Sub-agent: ${label}`, false, 'Sub-agent spawning is disabled or the nesting limit was reached.');
 	}
 	onEvent({ type: 'toolStart', callId, tool: SPAWN_TOOL, summary: `Sub-agent: ${label}`, args });
+	const maxTurns = Math.max(1, options.subagentMaxTurns ?? SUBAGENT_MAX_TURNS);
 	const systemPrompt = [
 		'You are a focused sub-agent helping with one subtask inside a larger coding session.',
 		'Complete the task below using the available tools, then reply with a concise result: what you found or did, and any file paths involved.',
 		'Do not ask questions; make reasonable assumptions and finish.',
+		`You have at most ${maxTurns} turns. Call independent tools together in one turn, and leave yourself a turn for the final reply.`,
 		'',
 		`Subtask: ${task}`,
 	].join('\n');
 	const messages: ChatMessage[] = [{ role: 'user', content: task }];
+	const reasoningEffort = options.subagentReasoningEffort === undefined ? options.reasoningEffort : options.subagentReasoningEffort || undefined;
+	// Text from the latest turn only, so a cut-off run does not pass its narration off as a result.
 	let result = '';
+	let outcome: RunOutcome;
 	try {
-		await runAgent({
+		outcome = await runAgent({
 			...options,
 			systemPrompt,
 			messages,
-			maxTurns: SUBAGENT_MAX_TURNS,
+			maxTurns,
+			reasoningEffort,
 			spawnDepth: (options.spawnDepth ?? 1) - 1,
+			// Namespaced like the tool events below, so an approval matches the step it belongs to.
+			requestPermission: request => options.requestPermission({ ...request, callId: `${callId}:${request.callId}` }),
 			onEvent: event => {
 				if (event.type === 'text') { result += event.text; }
 				// Re-emit sub-agent progress so the UI can group it, tagged with the parent call.
-				if (event.type === 'toolStart' || event.type === 'toolEnd') { onEvent({ ...event, callId: `${callId}:${event.callId}` }); }
+				if (event.type === 'toolStart' || event.type === 'toolEnd') {
+					if (event.type === 'toolStart') { result = ''; }
+					onEvent({ ...event, callId: `${callId}:${event.callId}` });
+				}
 			},
 		});
 	} catch (error) {
 		if (options.signal?.aborted) { return finish(onEvent, callId, false, 'Stopped by the user.'); }
 		return finish(onEvent, callId, false, `Sub-agent error: ${(error as Error).message}`);
 	}
-	const trimmed = result.trim();
-	const output = trimmed.length > SUBAGENT_CHARS ? trimmed.slice(0, SUBAGENT_CHARS) + '\n[... truncated ...]' : trimmed;
-	return finish(onEvent, callId, true, output || 'The sub-agent finished without a written result.');
+	if (outcome === 'aborted') { return finish(onEvent, callId, false, 'Stopped by the user.'); }
+	if (outcome === 'turnLimit' || outcome === 'empty') {
+		const reason = outcome === 'turnLimit' ? `ran out of turns (${maxTurns})` : 'stopped replying';
+		const partial = await rescueReport(messages, options, reasoningEffort);
+		return finish(onEvent, callId, false, clip(`The sub-agent ${reason} before finishing. ${partial ? `Partial report:\n${partial}` : 'It did not leave a report.'}`));
+	}
+	return finish(onEvent, callId, true, clip(result.trim()) || 'The sub-agent finished without a written result.');
+}
+
+/** Asks for a short report on what a cut-off sub-agent managed, so its work is not lost. */
+async function rescueReport(messages: ChatMessage[], options: AgentOptions, reasoningEffort?: string): Promise<string> {
+	let text = '';
+	try {
+		const work = flattenForSummary(messages).slice(-SUBAGENT_RESCUE_CHARS);
+		const request: ChatMessage[] = [{ role: 'user', content: `${SUBAGENT_RESCUE_PROMPT}\n\n<work>\n${work}\n</work>` }];
+		for await (const event of options.client.streamChat({ model: options.model, messages: request, maxTokens: options.maxTokens, reasoningEffort }, options.signal)) {
+			if (event.type === 'text') { text += event.text; }
+		}
+	} catch {
+		// Best-effort: the caller still reports the cut-off.
+	}
+	return text.trim();
+}
+
+function clip(text: string): string {
+	return text.length > SUBAGENT_CHARS ? text.slice(0, SUBAGENT_CHARS) + '\n[... truncated ...]' : text;
 }
 
 async function previewOf(tool: Tool, args: Record<string, unknown>, context: ToolContext) {

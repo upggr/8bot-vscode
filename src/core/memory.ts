@@ -17,23 +17,35 @@ async function write(file: string, text: string): Promise<void> {
 	await fs.writeFile(file, text, { encoding: 'utf8', mode: 0o600 });
 }
 
+/** Parallel sub-agents can save notes at the same moment, so each read-modify-write waits its turn. */
+let pending: Promise<unknown> = Promise.resolve();
+function locked<T>(work: () => Promise<T>): Promise<T> {
+	const result = pending.then(work);
+	pending = result.catch(() => undefined);
+	return result;
+}
+
 /** Adds a note. Returns false if the same note is already saved. */
-export async function addMemory(file: string, note: string): Promise<boolean> {
+export function addMemory(file: string, note: string): Promise<boolean> {
 	const clean = note.replace(/\s+/g, ' ').trim();
-	if (!clean) { throw new Error('A note is required.'); }
-	const current = await readMemory(file);
-	const line = `- ${clean}`;
-	if (current.split('\n').includes(line)) { return false; }
-	await write(file, `${current ? `${current}\n` : ''}${line}\n`);
-	return true;
+	if (!clean) { return Promise.reject(new Error('A note is required.')); }
+	return locked(async () => {
+		const current = await readMemory(file);
+		const line = `- ${clean}`;
+		if (current.split('\n').includes(line)) { return false; }
+		await write(file, `${current ? `${current}\n` : ''}${line}\n`);
+		return true;
+	});
 }
 
 /** Removes notes containing the text and returns how many were removed. */
-export async function removeMemory(file: string, text: string): Promise<number> {
+export function removeMemory(file: string, text: string): Promise<number> {
 	const needle = text.trim().toLowerCase();
-	if (!needle) { throw new Error('Text to match is required.'); }
-	const lines = (await readMemory(file)).split('\n').filter(Boolean);
-	const kept = lines.filter(line => !line.toLowerCase().includes(needle));
-	if (kept.length !== lines.length) { await write(file, kept.length ? `${kept.join('\n')}\n` : ''); }
-	return lines.length - kept.length;
+	if (!needle) { return Promise.reject(new Error('Text to match is required.')); }
+	return locked(async () => {
+		const lines = (await readMemory(file)).split('\n').filter(Boolean);
+		const kept = lines.filter(line => !line.toLowerCase().includes(needle));
+		if (kept.length !== lines.length) { await write(file, kept.length ? `${kept.join('\n')}\n` : ''); }
+		return lines.length - kept.length;
+	});
 }

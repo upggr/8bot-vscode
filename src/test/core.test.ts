@@ -5,7 +5,7 @@ import { AddressInfo } from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
-import { compact, runAgent, withCacheMarkers, AgentEvent, PermissionAnswer } from '../core/agent';
+import { compact, runAgent, subagentEffort, withCacheMarkers, AgentEvent, PermissionAnswer, PermissionRequest } from '../core/agent';
 import { buildAttachedContent, canReadImages, truncateAttachmentText } from '../core/attachments';
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, keepTokensFor, outputTokenLimit, flattenForSummary, looksLikeOverflow, trimForRequest } from '../core/context';
 import { addSpend, creditStatus } from '../core/credits';
@@ -13,7 +13,7 @@ import { Checkpoints } from '../core/checkpoints';
 import { LiveLimit } from '../core/gateway';
 import { sessionToMarkdown } from '../core/exportChat';
 import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
-import { addMemory, readMemory } from '../core/memory';
+import { addMemory, readMemory, removeMemory } from '../core/memory';
 import { decide, PermissionMode, rememberKey, restorePermissionMode } from '../core/permissions';
 import { buildSystemPrompt } from '../core/prompt';
 import { newSession, SessionStore } from '../core/sessions';
@@ -488,6 +488,174 @@ test('spawn_agent is refused when the depth limit is reached', async () => {
 	} finally { clean(); }
 });
 
+/** The sub-agent's task, read from the system prompt of its fresh conversation, or '' for the main agent. */
+function subtaskOf(request: { messages: ChatMessage[] }): string {
+	const system = request.messages[0]?.content;
+	const text = typeof system === 'string' ? system : Array.isArray(system) ? system.map(p => p.type === 'text' ? p.text : '').join('') : '';
+	return /Subtask: (.*)/.exec(text)?.[1] ?? '';
+}
+
+test('sub-agents spawned in one turn run at the same time and results keep call order', async () => {
+	const { root, clean } = workspace();
+	try {
+		let running = 0;
+		let peak = 0;
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				const task = subtaskOf(request);
+				if (task) {
+					running++;
+					peak = Math.max(peak, running);
+					// The slower first task proves outputs are placed by call, not by finish time.
+					await new Promise(r => setTimeout(r, task === 'a' ? 60 : 20));
+					running--;
+					yield say(`result ${task}`);
+					return;
+				}
+				if (request.messages.at(-1)?.role === 'tool') { yield say('main done'); return; }
+				yield call('m1', 'spawn_agent', { task: 'a' });
+				yield call('m2', 'spawn_agent', { task: 'b' });
+				yield call('m3', 'spawn_agent', { task: 'c' });
+			},
+		};
+		const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+		const outcome = await runAgent({ ...agentOptions(stream, root, 'default', 'allow', [], messages), spawnDepth: 1 });
+		assert.equal(outcome, 'done');
+		assert.equal(peak, 3, 'all three sub-agents were in flight together');
+		assert.deepEqual(messages.filter(m => m.role === 'tool').map(m => [m.tool_call_id, m.content]), [['m1', 'result a'], ['m2', 'result b'], ['m3', 'result c']]);
+	} finally { clean(); }
+});
+
+test('parallel steps never show two approval prompts at once', async () => {
+	const { root, clean } = workspace();
+	try {
+		const asked: string[] = [];
+		let open = 0;
+		let overlap = false;
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				const task = subtaskOf(request);
+				const last = request.messages.at(-1);
+				if (task) {
+					if (last?.role === 'tool') { yield say(`wrote ${task}`); return; }
+					yield call(`w-${task}`, 'write_file', { path: `${task}.txt`, content: task });
+					return;
+				}
+				if (last?.role === 'tool') { yield say('main done'); return; }
+				yield call('m1', 'spawn_agent', { task: 'a' });
+				yield call('m2', 'spawn_agent', { task: 'b' });
+			},
+		};
+		const requestPermission = async (r: PermissionRequest): Promise<PermissionAnswer> => {
+			if (open > 0) { overlap = true; }
+			open++;
+			asked.push(r.callId);
+			await new Promise(res => setTimeout(res, 15));
+			open--;
+			return 'allow';
+		};
+		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', []), requestPermission, spawnDepth: 1 });
+		assert.equal(overlap, false, 'never two approval prompts at once');
+		assert.deepEqual(asked.sort(), ['m1:w-a', 'm2:w-b'], 'prompts carry the namespaced call id the UI shows');
+		assert.equal(fs.readFileSync(path.join(root, 'a.txt'), 'utf8'), 'a');
+		assert.equal(fs.readFileSync(path.join(root, 'b.txt'), 'utf8'), 'b');
+	} finally { clean(); }
+});
+
+test('edits wait for the reads before them and run in the order the model called them', async () => {
+	const { root, clean } = workspace();
+	try {
+		fs.writeFileSync(path.join(root, 'f.txt'), 'old');
+		const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+		const stream = scripted([[
+			call('r1', 'read_file', { path: 'f.txt' }),
+			call('w1', 'write_file', { path: 'f.txt', content: 'new' }),
+			call('r2', 'read_file', { path: 'f.txt' }),
+		], [say('ok')]]);
+		await runAgent(agentOptions(stream, root, 'bypassPermissions', 'allow', [], messages));
+		const tools = messages.filter(m => m.role === 'tool');
+		assert.deepEqual(tools.map(m => m.tool_call_id), ['r1', 'w1', 'r2']);
+		assert.match(String(tools[0].content), /old/);
+		assert.match(String(tools[2].content), /new/);
+	} finally { clean(); }
+});
+
+test('a sub-agent that runs out of turns says so and reports what it found', async () => {
+	const { root, clean } = workspace();
+	try {
+		fs.writeFileSync(path.join(root, 'note.txt'), 'hello');
+		const events: AgentEvent[] = [];
+		let rescueAsked = '';
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				const last = request.messages.at(-1);
+				const lastText = last && typeof last.content === 'string' ? last.content : '';
+				// The partial-report request has no tools and carries the sub-agent's own work.
+				if (!request.tools && lastText.includes('ran out of turns')) {
+					rescueAsked = lastText;
+					yield say('Found that note.txt says hello. Not done: the summary.');
+					return;
+				}
+				if (subtaskOf(request)) {
+					// Narrate and keep calling tools without ever giving a final answer.
+					yield say('Let me look.');
+					yield call(`s${request.messages.length}`, 'read_file', { path: 'note.txt' });
+					return;
+				}
+				if (last?.role === 'tool') { yield say('main done'); return; }
+				yield call('m1', 'spawn_agent', { task: 'summarize note.txt', name: 'note' });
+			},
+		};
+		const outcome = await runAgent({ ...agentOptions(stream, root, 'default', 'allow', events), spawnDepth: 1, subagentMaxTurns: 2 });
+		assert.equal(outcome, 'done', 'the main agent still finishes');
+		const spawnEnd = events.find(e => e.type === 'toolEnd' && e.callId === 'm1') as { ok: boolean; output: string } | undefined;
+		assert.ok(spawnEnd && !spawnEnd.ok, 'a cut-off sub-agent is not reported as a success');
+		assert.match(spawnEnd?.output ?? '', /ran out of turns \(2\)/);
+		assert.match(spawnEnd?.output ?? '', /note\.txt says hello/, 'the partial report is passed back');
+		assert.doesNotMatch(spawnEnd?.output ?? '', /Let me look/, 'narration is not passed off as a result');
+		assert.match(rescueAsked, /hello/, 'the partial report was written from the sub-agent\'s own tool results');
+	} finally { clean(); }
+});
+
+test('sub-agents use their own reasoning effort and turn budget', async () => {
+	const { root, clean } = workspace();
+	try {
+		const efforts: Record<string, string | undefined> = {};
+		let subPrompt = '';
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				const task = subtaskOf(request);
+				if (task) {
+					efforts.sub = request.reasoningEffort;
+					const system = request.messages[0]?.content;
+					subPrompt = typeof system === 'string' ? system : JSON.stringify(system);
+					yield say('sub done');
+					return;
+				}
+				efforts.main = request.reasoningEffort;
+				if (request.messages.at(-1)?.role === 'tool') { yield say('main done'); return; }
+				yield call('m1', 'spawn_agent', { task: 'x' });
+			},
+		};
+		const base = { ...agentOptions(stream, root, 'default', 'allow', []), spawnDepth: 1, reasoningEffort: 'max' };
+		await runAgent({ ...base, subagentReasoningEffort: 'low', subagentMaxTurns: 7 });
+		assert.deepEqual(efforts, { main: 'max', sub: 'low' });
+		assert.match(subPrompt, /at most 7 turns/);
+		await runAgent({ ...base, messages: [{ role: 'user', content: 'go' }] });
+		assert.equal(efforts.sub, 'max', 'without a sub-agent setting the parent effort is inherited');
+		await runAgent({ ...base, messages: [{ role: 'user', content: 'go' }], subagentReasoningEffort: '' });
+		assert.equal(efforts.sub, undefined, 'an empty setting uses the model default');
+	} finally { clean(); }
+});
+
+test('sub-agent reasoning setting falls back to the model default when unsupported', () => {
+	assert.equal(subagentEffort('low', ['low', 'high']), 'low');
+	assert.equal(subagentEffort('xhigh', ['low', 'high']), '');
+	assert.equal(subagentEffort('', ['low']), '');
+	assert.equal(subagentEffort('inherit', ['low']), undefined);
+	assert.equal(subagentEffort('low', undefined), '');
+});
+
 test('denied and plan-mode actions never touch the disk', async () => {
 	const { root, clean } = workspace();
 	try {
@@ -864,6 +1032,17 @@ test('memory saves, avoids duplicates, removes and survives across chats', async
 		await assert.rejects(tool('remember').run({ note: 'x' }, ctx), /not available/);
 		assert.equal(tool('remember').kind({}, ctx), 'edit');
 		assert.equal(decide('plan', tool('remember').kind({}, ctx)), 'deny');
+	} finally { clean(); }
+});
+
+test('notes saved at the same moment by parallel sub-agents are all kept', async () => {
+	const { root, clean } = workspace();
+	try {
+		const file = path.join(root, 'memory.md');
+		await Promise.all(['one', 'two', 'three', 'four'].map(n => addMemory(file, `note ${n}`)));
+		assert.deepEqual((await readMemory(file)).split('\n').sort(), ['- note four', '- note one', '- note three', '- note two']);
+		await assert.rejects(addMemory(file, '  '), /required/);
+		assert.equal(await removeMemory(file, 'note t'), 2);
 	} finally { clean(); }
 });
 

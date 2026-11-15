@@ -16,7 +16,8 @@
 	const costRates = new Map();
 	let setupOpen = false;
 	let lastActivity = Date.now();
-	let awaitingApproval = false;
+	// Approval cards still waiting for an answer, by call id. Parallel steps can each have one.
+	const approvals = new Set();
 	let statusTimer;
 	let incantation = 0;
 	// Dark sorcery waiting phrases, cycled while the agent works — a grim twist on Claude's playful verbs.
@@ -338,7 +339,7 @@
 		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
 		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
 		let base;
-		if (awaitingApproval) { base = '⚠ Awaiting your blessing (approval)'; }
+		if (approvals.size) { base = '⚠ Awaiting your blessing (approval)'; }
 		else if (liveChars) {
 			// Tokens are arriving, so report the pause since the last one, not a dead stream.
 			base = seconds > 3 ? INCANTATIONS[incantation] + '… · ' + seconds + 's since last token' : INCANTATIONS[incantation] + '…';
@@ -365,15 +366,15 @@
 		} else if (!state.busy && statusTimer) {
 			clearInterval(statusTimer);
 			statusTimer = undefined;
-			awaitingApproval = false;
+			approvals.clear();
 		}
 		renderStatus();
 	}
 
 	function onEvent(event) {
 		lastActivity = Date.now();
-		if (event.type === 'permission') { awaitingApproval = true; }
-		if (event.type === 'toolEnd') { awaitingApproval = false; }
+		if (event.type === 'permission') { approvals.add(event.callId); }
+		if (event.type === 'toolEnd') { approvals.delete(event.callId); }
 		renderStatus();
 		switch (event.type) {
 			case 'user': {

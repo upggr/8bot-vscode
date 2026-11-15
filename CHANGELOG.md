@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.30
+
+- **Sub-agents run in parallel.** Sub-agents the model starts in the same turn now run at the same time instead of one after another, and so do independent reads (`read_file`, `list_files`, `search_text`), up to 6 at once. Edits, commands and memory changes still run one at a time in the order the model asked, after the reads before them, and approval prompts from parallel steps come up one at a time.
+- **Sub-agents no longer stop silently.** They get 40 turns instead of 12 (`eightbot.subagentMaxTurns`). If one runs out, it is reported as unfinished with a short report of what it found and what is left, instead of returning its last line of narration as a success.
+- **Faster sub-agents:** they use their own reasoning effort, `eightbot.subagentReasoningEffort` (default `low`), instead of inheriting the main chat's. Set it to `inherit` for the old behavior.
+
 ## 0.1.29
 
 - **Spend limits reached are detected properly:** the gateway documents HTTP 422 as "spend limit exceeded", so that status is now reported as a limit (with the subscription link) instead of a generic error.
