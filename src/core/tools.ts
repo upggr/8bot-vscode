@@ -13,7 +13,13 @@ export interface ToolContext {
 	signal?: AbortSignal;
 	/** Private per-project notes that carry across chats. */
 	memoryFile?: string;
+	/** Receives the latest output of a running command, about once a second, so a long command is not a silent wait. */
+	onOutput?: (text: string) => void;
 }
+
+/** How much of a running command's output is shown live. */
+const LIVE_OUTPUT_CHARS = 2_000;
+const LIVE_OUTPUT_INTERVAL_MS = 1_000;
 
 type Args = Record<string, unknown>;
 
@@ -300,6 +306,14 @@ const runCommand: Tool = {
 			const child = spawn(command, { shell: true, cwd: ctx.root, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
 			let output = '';
 			let timedOut = false;
+			const started = Date.now();
+			let shown = '';
+			// Live progress: the tail of the output plus the elapsed time, so a quiet command still shows it is alive.
+			const ticker = ctx.onOutput ? setInterval(() => {
+				const tail = output.slice(-LIVE_OUTPUT_CHARS);
+				const live = `${tail}${tail && !tail.endsWith('\n') ? '\n' : ''}… running ${Math.round((Date.now() - started) / 1000)}s`;
+				if (live !== shown) { shown = live; ctx.onOutput?.(live); }
+			}, LIVE_OUTPUT_INTERVAL_MS) : undefined;
 			const collect = (chunk: Buffer) => {
 				output += chunk.toString('utf8');
 				if (output.length > MAX_OUTPUT * 4) { output = output.slice(-MAX_OUTPUT * 2); }
@@ -313,9 +327,10 @@ const runCommand: Tool = {
 			ctx.signal?.addEventListener('abort', kill, { once: true });
 			child.stdout.on('data', collect);
 			child.stderr.on('data', collect);
-			child.on('error', error => { clearTimeout(timer); reject(new ToolError(error.message)); });
+			child.on('error', error => { clearTimeout(timer); clearInterval(ticker); reject(new ToolError(error.message)); });
 			child.on('close', code => {
 				clearTimeout(timer);
+				clearInterval(ticker);
 				ctx.signal?.removeEventListener('abort', kill);
 				const status = timedOut ? `Timed out after ${seconds}s.` : ctx.signal?.aborted ? 'Stopped by the user.' : `Exit code ${code}.`;
 				resolve(`${truncate(output)}\n${status}`.trim());

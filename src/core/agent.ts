@@ -1,4 +1,5 @@
 import { compactLimit, compactionCut, DEFAULT_OUTPUT_TOKENS, estimateTokens, flattenForSummary, KEEP_TOKENS_AFTER_COMPACT, keepTokensFor, looksLikeOverflow, SUMMARY_PREFIX, trimForRequest } from './context';
+import { StallError } from './gateway';
 import { decide, PermissionMode, rememberKey, ToolKind } from './permissions';
 import { byteSize, COMPACT_REQUEST_BYTES } from './requestSize';
 import { findTool, Tool, TOOLS, ToolContext } from './tools';
@@ -15,10 +16,19 @@ export interface PermissionRequest {
 	preview?: { path: string; before: string; after: string };
 }
 
+/**
+ * What the run is doing right now, so the UI can always say why it is quiet:
+ * waiting for the model's first token, receiving a tool call, or running tools.
+ */
+export type AgentPhase = 'waiting' | 'writingTool' | 'tools';
+
 export type AgentEvent =
 	| { type: 'text'; text: string }
 	| { type: 'reasoning'; text: string }
+	| { type: 'phase'; phase: AgentPhase; detail?: string }
 	| { type: 'toolStart'; callId: string; tool: string; summary: string; args: Record<string, unknown> }
+	/** Live output from a running step: command output, or a sub-agent's current activity. */
+	| { type: 'toolProgress'; callId: string; text: string }
 	| { type: 'toolEnd'; callId: string; ok: boolean; output: string }
 	| { type: 'usage'; usage: Usage }
 	| { type: 'notice'; message: string }
@@ -74,6 +84,9 @@ const SPAWN_SCHEMA = {
 		},
 	},
 } as const;
+
+/** A stalled request is retried this many times before the error reaches the user. */
+const STALL_RETRIES = 1;
 
 const COMPACT_PROMPT = 'Summarize this conversation so work can continue from the summary alone. Include the user\'s goals and exact requests, decisions made, files changed, errors and how they were solved, the current state, and the next step. Output only the summary.';
 const MIN_TURNS_BETWEEN_COMPACTIONS = 3;
@@ -131,11 +144,13 @@ export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 	let recovered = false;
 	let emptyReplies = 0;
 	let maxTokens = options.maxTokens;
+	let stallRetries = 0;
 	// The gateway guard can flag every request; report it once, then just count repeats.
 	let guardNotices = 0;
 
 	const summarize = async (turn: number, message: string, keepTokens = keepTokensFor(contextWindow)): Promise<boolean> => {
 		onEvent({ type: 'notice', message });
+		onEvent({ type: 'phase', phase: 'waiting', detail: 'summarizing older messages' });
 		const removed = await compact(options, keepTokens);
 		if (removed.length === 0) { return false; }
 		lastCompaction = turn;
@@ -169,7 +184,9 @@ export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 		let text = '';
 		const calls: ToolCall[] = [];
 		let finish = '';
+		let toolCharsShown = -1;
 
+		onEvent({ type: 'phase', phase: 'waiting' });
 		try {
 			const stream = client.streamChat({
 				model: options.model,
@@ -178,12 +195,21 @@ export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 				tools,
 				maxTokens,
 				reasoningEffort: options.reasoningEffort,
+				// Gateway retries otherwise wait silently for up to half a minute.
+				onRetry: detail => onEvent({ type: 'phase', phase: 'waiting', detail }),
 			}, signal);
 			for await (const event of stream) {
 				if (signal?.aborted) { break; }
 				if (event.type === 'text') { text += event.text; onEvent(event); }
 				else if (event.type === 'reasoning') { onEvent(event); }
 				else if (event.type === 'tool_call') { calls.push(event.call); }
+				else if (event.type === 'tool_progress') {
+					// Throttled to about one update per 500 characters, so a big edit does not flood the UI.
+					if (toolCharsShown < 0 || event.chars - toolCharsShown >= 500) {
+						toolCharsShown = event.chars;
+						onEvent({ type: 'phase', phase: 'writingTool', detail: `${event.name} · ${Math.ceil(event.chars / 4).toLocaleString('en-US')} tokens` });
+					}
+				}
 				else if (event.type === 'usage') {
 					if (event.usage.promptTokens > 0) { calibration = Math.min(Math.max(event.usage.promptTokens / estimate, 0.5), 4); }
 					onEvent({ type: 'usage', usage: event.usage });
@@ -205,6 +231,14 @@ export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 		} catch (error) {
 			if (text) { messages.push({ role: 'assistant', content: text }); }
 			if (signal?.aborted) { return 'aborted'; }
+			// A stalled connection usually works on a fresh request, so retry once before giving up.
+			// Not after text arrived, because the user has already seen part of that answer.
+			if (error instanceof StallError && !text && stallRetries < STALL_RETRIES) {
+				stallRetries++;
+				onEvent({ type: 'notice', message: `The gateway sent nothing for ${error.seconds}s, so the request was sent again.` });
+				turn--;
+				continue;
+			}
 			if (!text && !recovered && looksLikeOverflow(error, estimate * calibration, contextWindow)) {
 				recovered = true;
 				if (await summarize(turn, 'The request was too large, summarizing older messages and retrying.')) {
@@ -236,6 +270,7 @@ export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 			return 'empty';
 		}
 		emptyReplies = 0;
+		stallRetries = 0;
 		messages.push(calls.length ? { role: 'assistant', content: text || null, tool_calls: calls } : { role: 'assistant', content: text });
 
 		if (calls.length === 0) {
@@ -244,6 +279,7 @@ export async function runAgent(options: AgentOptions): Promise<RunOutcome> {
 			return 'done';
 		}
 
+		onEvent({ type: 'phase', phase: 'tools' });
 		const outputs = await runCalls(calls, options, remembered);
 		calls.forEach((call, i) => messages.push({ role: 'tool', tool_call_id: call.id, content: outputs[i] }));
 		if (signal?.aborted) { return 'aborted'; }
@@ -321,6 +357,7 @@ async function executeCall(call: ToolCall, options: AgentOptions, remembered: Se
 		commandTimeoutSeconds: options.commandTimeoutSeconds,
 		signal: options.signal,
 		memoryFile: options.memoryFile,
+		onOutput: text => onEvent({ type: 'toolProgress', callId: call.id, text }),
 	};
 	onEvent({ type: 'toolStart', callId: call.id, tool: name, summary, args });
 
@@ -383,6 +420,19 @@ async function runSubagent(callId: string, args: Record<string, unknown>, option
 	// Text from the latest turn only, so a cut-off run does not pass its narration off as a result.
 	let result = '';
 	let outcome: RunOutcome;
+	// What the sub-agent is doing, shown live on its step: its turn, phase and streamed output.
+	let turn = 0;
+	let streamed = 0;
+	let lastShown = '';
+	let lastShownAt = 0;
+	const show = (text: string, force = false) => {
+		const now = Date.now();
+		if (text === lastShown || (!force && now - lastShownAt < 1000)) { return; }
+		lastShown = text;
+		lastShownAt = now;
+		onEvent({ type: 'toolProgress', callId, text });
+	};
+	const where = () => `turn ${turn}/${maxTurns}`;
 	try {
 		outcome = await runAgent({
 			...options,
@@ -395,8 +445,19 @@ async function runSubagent(callId: string, args: Record<string, unknown>, option
 			requestPermission: request => options.requestPermission({ ...request, callId: `${callId}:${request.callId}` }),
 			onEvent: event => {
 				if (event.type === 'text') { result += event.text; }
+				if (event.type === 'phase') {
+					if (event.phase === 'waiting' && !event.detail) { turn++; streamed = 0; }
+					const doing = event.phase === 'tools' ? 'running tools' : event.phase === 'writingTool' ? `writing ${event.detail ?? 'a tool call'}` : event.detail ?? 'waiting for the model';
+					show(`${where()} · ${doing}`, true);
+				}
+				if (event.type === 'text' || event.type === 'reasoning') {
+					streamed += event.text.length;
+					show(`${where()} · ${event.type === 'reasoning' ? 'thinking' : 'writing'} · ~${Math.ceil(streamed / 4).toLocaleString('en-US')} tokens`);
+				}
+				// Notices (a retry, a summary) explain a pause, so they go on the step too.
+				if (event.type === 'notice') { show(`${where()} · ${event.message}`, true); }
 				// Re-emit sub-agent progress so the UI can group it, tagged with the parent call.
-				if (event.type === 'toolStart' || event.type === 'toolEnd') {
+				if (event.type === 'toolStart' || event.type === 'toolEnd' || event.type === 'toolProgress') {
 					if (event.type === 'toolStart') { result = ''; }
 					onEvent({ ...event, callId: `${callId}:${event.callId}` });
 				}
@@ -409,6 +470,7 @@ async function runSubagent(callId: string, args: Record<string, unknown>, option
 	if (outcome === 'aborted') { return finish(onEvent, callId, false, 'Stopped by the user.'); }
 	if (outcome === 'turnLimit' || outcome === 'empty') {
 		const reason = outcome === 'turnLimit' ? `ran out of turns (${maxTurns})` : 'stopped replying';
+		show(`${reason}, writing a partial report`, true);
 		const partial = await rescueReport(messages, options, reasoningEffort);
 		return finish(onEvent, callId, false, clip(`The sub-agent ${reason} before finishing. ${partial ? `Partial report:\n${partial}` : 'It did not leave a report.'}`));
 	}

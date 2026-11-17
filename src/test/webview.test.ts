@@ -267,28 +267,65 @@ test('permission card answers once and tool output is plain text', () => {
 	assert.equal($('transcript').querySelector('.output')?.textContent, '<img src=x>');
 });
 
-test('a busy chat shows live progress and approval waits', () => {
+test('a busy chat says what it is waiting for, and approval waits', () => {
 	const { send, $, dom } = load();
 	send({ ...STATE, busy: true });
 	assert.equal($('status').hidden, false);
-	assert.match($('status').textContent ?? '', /…/);
+	assert.match($('status').textContent ?? '', /^Waiting for the model · 0s/);
+	send({ type: 'event', event: { type: 'phase', phase: 'waiting', detail: 'the gateway answered 503, retrying in 2s (1/3)' } });
+	assert.match($('status').textContent ?? '', /Waiting · the gateway answered 503/);
 	send({ type: 'event', event: { type: 'permission', callId: 'x', summary: 's' } });
-	assert.match($('status').textContent ?? '', /blessing/);
+	assert.match($('status').textContent ?? '', /Waiting for your approval/);
 	send({ type: 'event', event: { type: 'toolEnd', callId: 'x', ok: true, output: '' } });
-	assert.match($('status').textContent ?? '', /…/);
+	assert.doesNotMatch($('status').textContent ?? '', /approval/);
 	send({ ...STATE, busy: false });
 	assert.equal($('status').hidden, true);
 	dom.window.close();
 });
 
-test('a busy chat shows a live token estimate while the model streams', () => {
+test('the status tells thinking from writing and shows a live cost', () => {
 	const { send, $, dom } = load();
 	send({ ...STATE, busy: true });
 	send({ type: 'event', event: { type: 'reasoning', text: 'x'.repeat(400) } });
-	assert.match($('status').textContent ?? '', /~100 tokens out/);
+	assert.match($('status').textContent ?? '', /^Thinking · ~100 tokens/);
 	send({ type: 'event', event: { type: 'usage', usage: { promptTokens: 1000, completionTokens: 1000, cost: 0.002, model: 'a' } } });
 	send({ type: 'event', event: { type: 'text', text: 'y'.repeat(400) } });
-	assert.match($('status').textContent ?? '', /~\$0\.000200/);
+	assert.match($('status').textContent ?? '', /^Writing the reply · ~200 tokens/);
+	assert.match($('status').textContent ?? '', /~\$0\.0002 so far/);
+	// A new turn starts its own count.
+	send({ type: 'event', event: { type: 'phase', phase: 'waiting' } });
+	assert.match($('status').textContent ?? '', /^Waiting for the model/);
+	send({ type: 'event', event: { type: 'phase', phase: 'writingTool', detail: 'write_file · 1,200 tokens' } });
+	assert.match($('status').textContent ?? '', /^Writing write_file · 1,200 tokens/);
+	send({ ...STATE, busy: false });
+	dom.window.close();
+});
+
+test('running steps are named in the status and show live progress', () => {
+	const { send, $, win, dom } = load();
+	send({ ...STATE, busy: true });
+	send({ type: 'event', event: { type: 'phase', phase: 'tools' } });
+	send({ type: 'event', event: { type: 'toolStart', callId: 'm1', tool: 'spawn_agent', summary: 'Sub-agent: theatre news' } });
+	send({ type: 'event', event: { type: 'toolStart', callId: 'r', tool: 'run_command', summary: 'Run npm test' } });
+	assert.match($('status').textContent ?? '', /^Running Sub-agent: theatre news, npm test · 0s/);
+	// The step reads "Ran npm test", not "Ran Run npm test".
+	assert.equal(win.document.querySelectorAll('.activity-item .target')[1]?.textContent, 'npm test');
+	// A sub-agent reports its turn and what it is doing on its own line.
+	send({ type: 'event', event: { type: 'toolProgress', callId: 'm1', text: 'turn 3/40 · thinking · ~1,200 tokens' } });
+	// Its own steps nest under it instead of crowding the list.
+	send({ type: 'event', event: { type: 'toolStart', callId: 'm1:a', tool: 'read_file', summary: 'Read a.txt' } });
+	const sub = win.document.querySelector('.activity-list > .activity-item') as HTMLElement;
+	assert.match(sub.querySelector('.live')?.textContent ?? '', /turn 3\/40 · thinking/);
+	assert.equal(sub.querySelectorAll('.children > .activity-item').length, 1);
+	assert.equal(win.document.querySelectorAll('.activity-list > .activity-item').length, 2, 'nested steps are not top-level');
+	// A command streams the tail of its output while it runs.
+	send({ type: 'event', event: { type: 'toolProgress', callId: 'r', text: 'test 1 ok\ntest 2 ok\n… running 4s' } });
+	const command = win.document.querySelectorAll('.activity-list > .activity-item')[1] as HTMLElement;
+	assert.match(command.querySelector('.output')?.textContent ?? '', /test 2 ok/);
+	assert.match(win.document.querySelector('.activity summary')?.textContent ?? '', /2 running · 0 of 2 done/);
+	// Stopping without end events must not leave steps ticking.
+	send({ type: 'event', event: { type: 'done' } });
+	assert.equal(win.document.querySelectorAll('.activity-item.running').length, 0);
 	send({ ...STATE, busy: false });
 	dom.window.close();
 });
@@ -309,7 +346,7 @@ test('tool calls batch into one collapsed activity group instead of many boxes',
 	// When the turn ends the group folds to a quiet summary, not an open list.
 	send({ type: 'event', event: { type: 'text', text: 'Done.' } });
 	assert.equal((groups[0] as HTMLDetailsElement).open, false);
-	assert.match(groups[0].querySelector('summary')?.textContent ?? '', /3 rites performed/);
+	assert.match(groups[0].querySelector('summary')?.textContent ?? '', /^3 steps$/);
 	dom.window.close();
 });
 

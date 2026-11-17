@@ -115,6 +115,11 @@ function render(event: AgentEvent, stream: vscode.ChatResponseStream, root: stri
 			if (!event.ok) { stream.markdown(`\n\n> ${event.output.split('\n')[0]}\n\n`); }
 			stream.progress('Thinking...');
 			break;
+		case 'phase':
+			// Native chat has one progress line; keep it saying what is happening.
+			if (event.phase === 'writingTool') { stream.progress(`Writing ${event.detail ?? 'a tool call'}...`); }
+			else if (event.phase === 'waiting' && event.detail) { stream.progress(`Waiting: ${event.detail}...`); }
+			break;
 		case 'notice':
 			stream.markdown(`\n\n> ${event.message}\n\n`);
 			break;

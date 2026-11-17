@@ -132,6 +132,14 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; backgro
 .activity-item.ok .verb::before { content: '✓ '; color: var(--vscode-testing-iconPassed); }
 .activity-item.failed .verb::before { content: '✗ '; color: var(--vscode-errorForeground); }
 .activity-item .output { flex-basis: 100%; margin: 2px 0 4px; max-height: 180px; }
+.activity-item .output:empty { display: none; }
+/* Live progress on a running step: elapsed time, and one line saying what it is doing. */
+.activity-item .elapsed { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 0.92em; opacity: 0.8; }
+.activity-item .live { flex-basis: 100%; padding-left: 14px; font-size: 0.92em; font-style: italic; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.activity-item .live:empty { display: none; }
+/* A sub-agent's own steps, nested under it. */
+.activity-item .children { flex-basis: 100%; display: flex; flex-direction: column; gap: 1px; margin: 2px 0 2px 6px; padding-left: 6px; border-left: 1px dashed var(--vscode-panel-border); }
+.activity-item.child { padding-left: 4px; font-size: 0.95em; }
 .reasoning { font-size: 0.88em; }
 .reasoning summary { cursor: pointer; overflow-wrap: anywhere; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; list-style: none; color: var(--vscode-descriptionForeground); background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); }
 .reasoning summary::-webkit-details-marker { display: none; }

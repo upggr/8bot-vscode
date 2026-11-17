@@ -17,6 +17,14 @@ export class GatewayError extends Error {
 	}
 }
 
+/** The stream sent nothing for longer than the idle timeout. */
+export class StallError extends GatewayError {
+	constructor(readonly seconds: number) {
+		super(`The gateway stopped responding for ${seconds} seconds. Send "continue" to try again.`, undefined, 'stalled');
+		this.name = 'StallError';
+	}
+}
+
 /** Remaining allowance at one limit scope, from the Pax8 limits API. */
 export interface LiveLimit {
 	limit: number;
@@ -152,7 +160,7 @@ export class GatewayClient implements ChatStreamer {
 			headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Idempotency-Key': uuidV7() },
 			body: payload,
 			signal,
-		});
+		}, request.onRetry);
 	}
 
 	private async findFailoverModel(request: ChatRequest, signal?: AbortSignal): Promise<ModelInfo | undefined> {
@@ -174,9 +182,7 @@ export class GatewayClient implements ChatStreamer {
 		try {
 			yield* this.streamOnce(request, combined, touch);
 		} catch (error) {
-			if (timedOut) {
-				throw new GatewayError(`The gateway stopped responding for ${Math.round(this.idleTimeoutMs / 1000)} seconds. Send "continue" to try again.`);
-			}
+			if (timedOut) { throw new StallError(Math.round(this.idleTimeoutMs / 1000)); }
 			throw error;
 		} finally {
 			clearTimeout(timer);
@@ -235,6 +241,9 @@ export class GatewayClient implements ChatStreamer {
 				if (part.function?.name && !call.function.name) { call.function.name = part.function.name; }
 				if (part.function?.arguments) { call.function.arguments += part.function.arguments; }
 			}
+			// A large edit can stream for a minute before the call is complete, so report its growth.
+			const growing = delta?.tool_calls?.length ? [...calls.values()].at(-1) : undefined;
+			if (growing) { yield { type: 'tool_progress', name: growing.function.name || 'tool', chars: growing.function.arguments.length }; }
 			if (chunk.usage) {
 				const usage = toUsage(chunk.usage, chunk.model);
 				this.onUsage?.(usage);
@@ -251,7 +260,7 @@ export class GatewayClient implements ChatStreamer {
 		}
 	}
 
-	private async send(path: string, init: RequestInit): Promise<Response> {
+	private async send(path: string, init: RequestInit, onRetry?: (detail: string) => void): Promise<Response> {
 		const headers: Record<string, string> = { ...(init.headers as Record<string, string>), Authorization: `Bearer ${this.apiKey}` };
 		if (this.taskHint) { headers['X-Pax8-Task'] = this.taskHint; }
 		if (this.agentId) { headers['X-Pax8-Agent-ID'] = this.agentId; }
@@ -266,7 +275,9 @@ export class GatewayClient implements ChatStreamer {
 				if (attempt >= MAX_RETRIES) {
 					throw new GatewayError(`Could not reach the gateway: ${this.redact(String(error))}`);
 				}
-				await this.sleep(backoff(attempt));
+				const wait = backoff(attempt);
+				onRetry?.(`could not reach the gateway, retrying in ${Math.round(wait / 1000)}s (${attempt + 1}/${MAX_RETRIES})`);
+				await this.sleep(wait);
 				continue;
 			}
 			if (response.ok) { return response; }
@@ -280,7 +291,9 @@ export class GatewayClient implements ChatStreamer {
 				const text = await response.text().catch(() => '');
 				if (response.status === 429 && LIMIT_TEXT.test(text)) { throw this.toError(response.status, text); }
 				const retryAfter = Number(response.headers.get('retry-after'));
-				await this.sleep(retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : backoff(attempt));
+				const wait = retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : backoff(attempt);
+				onRetry?.(`the gateway answered ${response.status}, retrying in ${Math.round(wait / 1000)}s (${attempt + 1}/${MAX_RETRIES})`);
+				await this.sleep(wait);
 				continue;
 			}
 			throw this.toError(response.status, await response.text().catch(() => ''));

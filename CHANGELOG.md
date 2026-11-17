@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.31
+
+- **No more silent pauses.** The status line now always says what is happening and for how long, instead of rotating phrases: `Waiting for the model · 1m 05s`, `Thinking · ~2,400 tokens · 38s`, `Writing the reply`, `Writing write_file · 3,100 tokens`, `Running Sub-agent: theatre news, npm test · 12s`, or `Waiting · the gateway answered 503, retrying in 4s (1/3)`. After 45 seconds with no response it says so and points at Stop.
+- **Sub-agents show what they are doing.** Each running sub-agent shows its turn and current activity on its own line (`turn 6/40 · thinking · ~900 tokens`), and its own steps nest under it, keeping only the latest few. Before, a sub-agent's card sat frozen for minutes because its thinking, writing and waiting were dropped.
+- **Commands stream their output.** A running command shows the tail of its output and its runtime, updated every second, instead of nothing until it ends. Every running step shows a live elapsed time, and finished steps keep how long they took.
+- **Large edits show progress.** While the model streams a big `write_file` or `edit_file`, which can take a minute before anything runs, the status shows the call growing.
+- **Gateway retries are visible.** A 5xx/429 or network retry is shown with its wait, rather than up to 30 silent seconds.
+- **A stalled request is retried once automatically.** When the gateway sends nothing for the idle timeout before any text arrives, the request is sent again once, with a notice, instead of failing the whole run (or the whole batch of sub-agents).
+- Steps left running by Stop no longer keep ticking, and the activity group reads `2 running · 3 of 5 done` / `5 steps`. Command steps read `Ran npm test`, not `Ran Run npm test`.
+
 ## 0.1.30
 
 - **Sub-agents run in parallel.** Sub-agents the model starts in the same turn now run at the same time instead of one after another, and so do independent reads (`read_file`, `list_files`, `search_text`), up to 6 at once. Edits, commands and memory changes still run one at a time in the order the model asked, after the reads before them, and approval prompts from parallel steps come up one at a time.

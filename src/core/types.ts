@@ -55,6 +55,8 @@ export type StreamEvent =
 	| { type: 'text'; text: string }
 	| { type: 'reasoning'; text: string }
 	| { type: 'tool_call'; call: ToolCall }
+	/** A tool call still streaming in: its name and how many argument characters have arrived. */
+	| { type: 'tool_progress'; name: string; chars: number }
 	| { type: 'usage'; usage: Usage }
 	| { type: 'guard'; result: string; risk: string; recommendation: string }
 	| { type: 'failover'; model: string; name: string; contextWindow: number }
@@ -67,6 +69,8 @@ export interface ChatRequest {
 	toolChoice?: 'auto' | 'required';
 	maxTokens?: number;
 	reasoningEffort?: string;
+	/** Told when the gateway is about to retry, so the wait is not silent. Not sent to the gateway. */
+	onRetry?: (detail: string) => void;
 }
 
 export interface ChatStreamer {

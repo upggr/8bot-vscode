@@ -15,18 +15,16 @@
 	/** Learned $ per token per model, from completed requests this session. Used for live cost hints only. */
 	const costRates = new Map();
 	let setupOpen = false;
+	// When the last token or event arrived, and when the current phase started.
 	let lastActivity = Date.now();
 	// Approval cards still waiting for an answer, by call id. Parallel steps can each have one.
 	const approvals = new Set();
 	let statusTimer;
-	let incantation = 0;
-	// Dark sorcery waiting phrases, cycled while the agent works — a grim twist on Claude's playful verbs.
-	const INCANTATIONS = [
-		'Summoning the spirits', 'Consulting the void', 'Reading the runes', 'Brewing the answer',
-		'Casting the incantation', 'Whispering to the machine', 'Divining the diff', 'Binding the tokens',
-		'Channeling the dark arts', 'Scrying the codebase', 'Transmuting errors', 'Raising the dead code',
-		'Deciphering the grimoire', 'Piercing the veil', 'Stirring the cauldron', 'Unmaking the bug',
-	];
+	// What the run is doing right now, from the agent's phase events, so the status can say why it is quiet.
+	let phase = { name: 'waiting', detail: '', since: Date.now(), streamed: 0 };
+	// Live tokens of the current phase, split so the status can say whether the model thinks or writes.
+	let phaseReasoning = 0;
+	let phaseText = 0;
 	// Tool calls for the current assistant turn, batched into one collapsible group
 	// so a long run of commands does not flood the transcript.
 	let activity = null;
@@ -41,7 +39,7 @@
 
 	function toolTarget(summary, toolName) {
 		if (TOOL_VERBS[toolName]) {
-			const cleaned = summary.replace(/^(Read|Searched for|Listed|Edit|Create|Ran|Save|Search|Fetch)\s+/i, '');
+			const cleaned = summary.replace(/^(Read|Searched for|Listed|Edit|Create|Run|Ran|Save|Search|Fetch)\s+/i, '');
 			return cleaned || summary;
 		}
 		return '';
@@ -59,27 +57,59 @@
 
 	function activitySummary() {
 		if (!activity) { return; }
-		const total = activity.querySelector('.activity-list').children.length;
-		const running = activity.querySelectorAll('.activity-item.running').length;
+		// Top-level steps only; a sub-agent's own steps are counted inside it.
+		const list = activity.querySelector('.activity-list');
+		const total = list.children.length;
+		const running = list.querySelectorAll(':scope > .activity-item.running').length;
 		const open = activity.open;
 		const summary = activity.querySelector('summary');
 		summary.textContent = running > 0
-			? 'Weaving… ' + (total - running + 1) + '/' + total
-			: total === 1 ? '1 rite performed' : total + ' rites performed';
+			? running + ' running · ' + (total - running) + ' of ' + total + ' done'
+			: total === 1 ? '1 step' : total + ' steps';
 		if (running === 0 && open) { activity.open = false; }
 	}
 
 	function startTool(event) {
 		const group = ensureActivity();
-		const item = element('div', 'activity-item running');
+		// Sub-agent steps carry "parent:child" ids; they nest under their parent so parallel agents stay readable.
+		const parentId = event.callId.includes(':') ? event.callId.slice(0, event.callId.lastIndexOf(':')) : '';
+		const parent = parentId ? tools.get(parentId) : undefined;
+		const item = element('div', 'activity-item running' + (parent ? ' child' : ''));
 		item.appendChild(element('span', 'verb', verbFor(event.tool, event.summary)));
 		item.appendChild(element('span', 'target', toolTarget(event.summary, event.tool)));
+		item.appendChild(element('span', 'elapsed'));
+		// One line of live status (a sub-agent's turn, a command's runtime), above the output.
+		item.appendChild(element('span', 'live'));
 		const output = element('pre', 'output');
 		item.appendChild(output);
-		group.querySelector('.activity-list').appendChild(item);
+		item.dataset.started = String(Date.now());
+		if (parent) {
+			let children = parent.querySelector('.children');
+			if (!children) { children = parent.insertBefore(element('div', 'children'), parent.querySelector('.output')); }
+			children.appendChild(item);
+			// Keep a long-running sub-agent's history short: only its latest few steps stay visible.
+			const done = children.querySelectorAll('.activity-item:not(.running)');
+			for (let i = 0; i < done.length - 3; i++) { done[i].remove(); }
+		} else {
+			group.querySelector('.activity-list').appendChild(item);
+		}
 		tools.set(event.callId, item);
 		activitySummary();
 		scroll();
+	}
+
+	function showToolProgress(callId, text) {
+		const item = tools.get(callId);
+		if (!item) { return; }
+		if (item.querySelector('.children') || text.indexOf('\n') < 0) {
+			// A sub-agent or a one-line status: show it on the live line.
+			item.querySelector('.live').textContent = text;
+		} else {
+			// A command: show the tail of its output while it runs.
+			const output = item.querySelector('.output');
+			output.textContent = text;
+			output.scrollTop = output.scrollHeight;
+		}
 	}
 
 	function endTool(callId, ok, output) {
@@ -88,9 +118,25 @@
 			item.classList.remove('running');
 			item.classList.add(ok ? 'ok' : 'failed');
 			item.querySelector('.output').textContent = output;
+			const live = item.querySelector('.live');
+			if (live) { live.textContent = ''; }
+			const elapsed = item.querySelector('.elapsed');
+			const seconds = Math.round((Date.now() - Number(item.dataset.started || Date.now())) / 1000);
+			// Only worth showing when the step took a noticeable time.
+			if (elapsed) { elapsed.textContent = seconds >= 2 ? duration(seconds) : ''; }
 			tools.delete(callId);
 		}
 		activitySummary();
+	}
+
+	/** Ticks the elapsed time on every running step, so nothing on screen looks frozen. */
+	function tickSteps() {
+		const now = Date.now();
+		tools.forEach(item => {
+			const seconds = Math.floor((now - Number(item.dataset.started || now)) / 1000);
+			const elapsed = item.querySelector('.elapsed');
+			if (elapsed) { elapsed.textContent = seconds >= 2 ? duration(seconds) : ''; }
+		});
 	}
 
 	// Kept in sync with src/core/attachments.ts.
@@ -332,37 +378,76 @@
 		scroll();
 	}
 
+	/** "1m 05s" style durations, so long waits read at a glance. */
+	function duration(seconds) {
+		if (seconds < 60) { return seconds + 's'; }
+		const s = seconds % 60;
+		return Math.floor(seconds / 60) + 'm ' + (s < 10 ? '0' : '') + s + 's';
+	}
+
+	/** Names the steps still running, e.g. "Sub-agent: theatre, npm test (+2)". */
+	function runningSteps() {
+		const names = [];
+		tools.forEach(item => {
+			if (item.classList.contains('child')) { return; }
+			names.push(item.querySelector('.target').textContent || item.querySelector('.verb').textContent);
+		});
+		if (!names.length) { return ''; }
+		const shown = names.slice(0, 2).map(n => n.length > 48 ? n.slice(0, 47) + '…' : n).join(', ');
+		return shown + (names.length > 2 ? ' (+' + (names.length - 2) + ')' : '');
+	}
+
+	/** Tells the user exactly what the agent is doing and for how long, never a bare spinner. */
 	function renderStatus() {
 		const status = $('status');
 		status.hidden = !state.busy;
 		if (!state.busy) { return; }
-		const seconds = Math.floor((Date.now() - lastActivity) / 1000);
+		const now = Date.now();
+		const inPhase = Math.floor((now - phase.since) / 1000);
+		const quiet = Math.floor((now - lastActivity) / 1000);
 		const queued = state.queue && state.queue.length ? ' · ' + state.queue.length + ' queued' : '';
 		let base;
-		if (approvals.size) { base = '⚠ Awaiting your blessing (approval)'; }
-		else if (liveChars) {
-			// Tokens are arriving, so report the pause since the last one, not a dead stream.
-			base = seconds > 3 ? INCANTATIONS[incantation] + '… · ' + seconds + 's since last token' : INCANTATIONS[incantation] + '…';
+		if (approvals.size) {
+			base = '⚠ Waiting for your approval';
+		} else if (phase.name === 'tools') {
+			const steps = runningSteps();
+			base = (steps ? 'Running ' + steps : 'Running tools') + ' · ' + duration(inPhase);
+		} else if (phase.name === 'writingTool') {
+			base = 'Writing ' + (phase.detail || 'a tool call') + ' · ' + duration(inPhase);
+		} else if (phaseReasoning || phaseText) {
+			// Tokens are arriving: say whether the model thinks or writes, and flag a long gap.
+			const verb = phaseText ? 'Writing the reply' : 'Thinking';
+			const tokens = Math.ceil((phaseReasoning + phaseText) / 4);
+			base = verb + ' · ~' + tokens.toLocaleString() + ' tokens · ' + duration(inPhase) + (quiet >= 10 ? ' · no new tokens for ' + duration(quiet) : '');
+		} else {
+			// Nothing streamed yet: the gateway or the model has not answered.
+			const what = phase.detail ? 'Waiting · ' + phase.detail : 'Waiting for the model';
+			base = what + ' · ' + duration(inPhase) + (inPhase >= 45 ? ' · no response yet, press Stop to cancel' : '');
 		}
-		else { base = seconds < 30 ? INCANTATIONS[incantation] + '… ' + seconds + 's' : 'The spirits are silent (' + seconds + 's) — press Stop to break the spell'; }
 		const liveTokens = Math.ceil(liveChars / 4);
 		const rate = costRates.get(state.liveModel || state.model);
-		const estimate = liveChars && rate ? ' (~$' + (liveTokens * rate).toFixed(6) + ')' : '';
-		const live = liveChars ? ' · ~' + liveTokens.toLocaleString() + ' tokens out' + estimate : '';
-		status.textContent = base + live + queued;
+		const estimate = liveChars && rate ? ' · ~$' + (liveTokens * rate).toFixed(4) + ' so far' : '';
+		status.textContent = base + estimate + queued;
+	}
+
+	function setPhase(name, detail) {
+		const now = Date.now();
+		// A detail update in the same phase (tool call growing, retry notice) keeps the phase clock running.
+		if (name !== phase.name || (name === 'waiting' && !detail)) {
+			phase = { name: name, detail: detail || '', since: now };
+			phaseReasoning = 0;
+			phaseText = 0;
+		} else {
+			phase.detail = detail || '';
+		}
+		lastActivity = now;
 	}
 
 	function updateStatusTimer() {
 		if (state.busy && !statusTimer) {
 			lastActivity = Date.now();
-			incantation = Math.floor(Math.random() * INCANTATIONS.length);
-			statusTimer = setInterval(() => {
-				// Drift to a new dark phrase every few seconds while it works.
-				if (Math.floor((Date.now() - lastActivity) / 1000) % 4 === 0 && Math.random() < 0.3) {
-					incantation = (incantation + 1) % INCANTATIONS.length;
-				}
-				renderStatus();
-			}, 1000);
+			setPhase('waiting');
+			statusTimer = setInterval(() => { renderStatus(); tickSteps(); }, 1000);
 		} else if (!state.busy && statusTimer) {
 			clearInterval(statusTimer);
 			statusTimer = undefined;
@@ -372,11 +457,16 @@
 	}
 
 	function onEvent(event) {
-		lastActivity = Date.now();
 		if (event.type === 'permission') { approvals.add(event.callId); }
 		if (event.type === 'toolEnd') { approvals.delete(event.callId); }
-		renderStatus();
 		switch (event.type) {
+			case 'phase':
+				setPhase(event.phase, event.detail);
+				break;
+			case 'toolProgress':
+				lastActivity = Date.now();
+				showToolProgress(event.callId, event.text);
+				break;
 			case 'user': {
 				endAssistant();
 				activity = null;
@@ -400,11 +490,13 @@
 			}
 			case 'text':
 				liveChars += event.text.length;
+				phaseText += event.text.length;
 				lastActivity = Date.now();
 				appendAssistant(event.text);
 				break;
 			case 'reasoning':
 				liveChars += event.text.length;
+				phaseReasoning += event.text.length;
 				lastActivity = Date.now();
 				if (!reasoningEl) {
 					const box = add(element('details', 'reasoning'));
@@ -412,7 +504,7 @@
 					reasoningEl = box.appendChild(element('div', 'output'));
 				}
 				reasoningEl.textContent += event.text;
-				reasoningEl.parentElement.querySelector('summary').textContent = 'Thinking… ~' + Math.ceil(liveChars / 4).toLocaleString() + ' tokens';
+				reasoningEl.parentElement.querySelector('summary').textContent = 'Thinking… ~' + Math.ceil(phaseReasoning / 4).toLocaleString() + ' tokens';
 				break;
 			case 'toolStart': {
 				endAssistant();
@@ -449,6 +541,10 @@
 				break;
 			case 'done':
 				endAssistant();
+				// A stopped run can leave steps that never got an end event; do not let them tick forever.
+				tools.forEach(item => { item.classList.remove('running'); item.classList.add('failed'); });
+				tools.clear();
+				activitySummary();
 				if (event.rewind && event.rewind.count > 0) { showRewind(event.rewind); }
 				break;
 			default:

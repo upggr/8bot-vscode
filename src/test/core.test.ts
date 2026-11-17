@@ -12,7 +12,7 @@ import { addSpend, creditStatus } from '../core/credits';
 import { Checkpoints } from '../core/checkpoints';
 import { LiveLimit } from '../core/gateway';
 import { sessionToMarkdown } from '../core/exportChat';
-import { GatewayClient, GatewayError, normalizeBaseUrl } from '../core/gateway';
+import { GatewayClient, GatewayError, normalizeBaseUrl, StallError } from '../core/gateway';
 import { addMemory, readMemory, removeMemory } from '../core/memory';
 import { decide, PermissionMode, rememberKey, restorePermissionMode } from '../core/permissions';
 import { buildSystemPrompt } from '../core/prompt';
@@ -494,6 +494,104 @@ function subtaskOf(request: { messages: ChatMessage[] }): string {
 	const text = typeof system === 'string' ? system : Array.isArray(system) ? system.map(p => p.type === 'text' ? p.text : '').join('') : '';
 	return /Subtask: (.*)/.exec(text)?.[1] ?? '';
 }
+
+test('a sub-agent reports its turn and phase live on its own step', async () => {
+	const { root, clean } = workspace();
+	try {
+		fs.writeFileSync(path.join(root, 'note.txt'), 'hello');
+		const stream: ChatStreamer = {
+			async *streamChat(request) {
+				const task = subtaskOf(request);
+				const last = request.messages.at(-1);
+				if (task) {
+					if (last?.role === 'tool') { yield { type: 'reasoning', text: 'x'.repeat(40) }; yield say('found hello'); return; }
+					yield call('s1', 'read_file', { path: 'note.txt' });
+					return;
+				}
+				if (last?.role === 'tool') { yield say('main done'); return; }
+				yield call('m1', 'spawn_agent', { task: 'read note', name: 'note' });
+			},
+		};
+		const events: AgentEvent[] = [];
+		await runAgent({ ...agentOptions(stream, root, 'default', 'allow', events), spawnDepth: 1 });
+		const live = events.flatMap(e => e.type === 'toolProgress' && e.callId === 'm1' ? [e.text] : []);
+		assert.ok(live.includes('turn 1/40 · waiting for the model'), live.join(' | '));
+		assert.ok(live.includes('turn 1/40 · running tools'));
+		assert.ok(live.includes('turn 2/40 · waiting for the model'));
+		// The main run says when it is waiting and when it runs tools.
+		assert.deepEqual(events.filter(e => e.type === 'phase').map(e => (e as { phase: string }).phase), ['waiting', 'tools', 'waiting']);
+	} finally { clean(); }
+});
+
+test('a stalled request is retried once before the error reaches the user', async () => {
+	const { root, clean } = workspace();
+	try {
+		let calls = 0;
+		const stream: ChatStreamer = {
+			async *streamChat() {
+				calls++;
+				if (calls === 1) { throw new StallError(240); }
+				yield say('ok');
+			},
+		};
+		const events: AgentEvent[] = [];
+		assert.equal(await runAgent(agentOptions(stream, root, 'default', 'allow', events)), 'done');
+		assert.equal(calls, 2);
+		assert.ok(events.some(e => e.type === 'notice' && /sent nothing for 240s, so the request was sent again/.test(e.message)));
+		// A second stall in a row is reported, not retried forever.
+		const always: ChatStreamer = { async *streamChat() { yield* []; throw new StallError(240); } };
+		await assert.rejects(runAgent(agentOptions(always, root, 'default', 'allow', [])), /stopped responding for 240 seconds/);
+	} finally { clean(); }
+});
+
+test('gateway retries and a long command are not silent waits', async () => {
+	const { ctx, clean } = workspace();
+	try {
+		let attempts = 0;
+		handler = (_req, res) => {
+			attempts++;
+			if (attempts === 1) { res.writeHead(503).end('busy'); return; }
+			sse(res, [{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+		};
+		const retries: string[] = [];
+		await collect(client().streamChat({ model: 'm', messages: [], onRetry: detail => retries.push(detail) }));
+		assert.equal(retries.length, 1);
+		assert.match(retries[0], /the gateway answered 503, retrying in \d+s \(1\/3\)/);
+		const live: string[] = [];
+		const out = await tool('run_command').run({ command: 'echo first; sleep 1.3; echo second' }, { ...ctx, onOutput: t => live.push(t) });
+		assert.match(out, /first\s+second\s+Exit code 0/);
+		assert.ok(live.some(t => /first\n… running 1s/.test(t)), live.join(' | '));
+	} finally { clean(); }
+});
+
+test('a tool call that streams in is reported while it grows', async () => {
+	const big = 'y'.repeat(1200);
+	handler = (_req, res) => sse(res, [
+		{ choices: [{ delta: { tool_calls: [{ index: 0, id: 'w', function: { name: 'write_file', arguments: '' } }] } }] },
+		{ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: `{"path":"a","content":"${big}` } }] } }] },
+		{ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: `${big}"}` } }] } }] },
+		{ choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+	]);
+	const events = await collect(client().streamChat({ model: 'm', messages: [] }));
+	const growth = events.flatMap(e => e.type === 'tool_progress' ? [e.chars] : []);
+	assert.deepEqual(events.filter(e => e.type === 'tool_progress').map(e => (e as { name: string }).name), ['write_file', 'write_file', 'write_file']);
+	assert.ok(growth[2] > growth[1] && growth[1] > growth[0]);
+	const { root, clean } = workspace();
+	try {
+		const scriptedCall: ChatStreamer = {
+			async *streamChat(request) {
+				if (request.messages.at(-1)?.role === 'tool') { yield say('done'); return; }
+				for (let n = 0; n <= 3000; n += 250) { yield { type: 'tool_progress', name: 'write_file', chars: n }; }
+				yield call('w', 'write_file', { path: 'a.txt', content: 'x' });
+			},
+		};
+		const agentEvents: AgentEvent[] = [];
+		await runAgent(agentOptions(scriptedCall, root, 'bypassPermissions', 'allow', agentEvents));
+		const writing = agentEvents.flatMap(e => e.type === 'phase' && e.phase === 'writingTool' ? [e.detail] : []);
+		// Throttled: one update per ~500 characters, not one per chunk.
+		assert.deepEqual(writing, ['write_file · 0 tokens', 'write_file · 125 tokens', 'write_file · 250 tokens', 'write_file · 375 tokens', 'write_file · 500 tokens', 'write_file · 625 tokens', 'write_file · 750 tokens']);
+	} finally { clean(); }
+});
 
 test('sub-agents spawned in one turn run at the same time and results keep call order', async () => {
 	const { root, clean } = workspace();
